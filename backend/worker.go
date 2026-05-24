@@ -65,8 +65,18 @@ func processJob(db *vbolt.DB, id string) {
 		"--audio-quality", "0",
 		"--output", filepath.Join(jobDir, "%(title)s.%(ext)s"),
 		"--print", "after_move:filepath",
-		job.URL,
 	}
+	nodePath := cfg.NodeCmd
+	if nodePath == "" {
+		nodePath, _ = exec.LookPath("node")
+	}
+	if nodePath != "" {
+		log.Printf("worker: using node at %s", nodePath)
+		ytArgs = append(ytArgs, "--js-runtimes", "node:"+nodePath)
+	} else {
+		log.Println("worker: node not found, yt-dlp may fail without a JS runtime")
+	}
+	ytArgs = append(ytArgs, job.URL)
 	var ytStderr bytes.Buffer
 	ytCmd := exec.Command(cfg.YtDlpCmd, ytArgs...)
 	ytCmd.Stderr = &ytStderr

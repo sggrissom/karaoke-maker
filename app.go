@@ -23,6 +23,7 @@ func MakeApplication() *vbeam.Application {
 	if os.Getenv("PROD") == "true" || os.Getenv("ENVIRONMENT") == "production" {
 		_ = godotenv.Load("/srv/apps/karaoke/shared/.env")
 	}
+	cfg.ApplyEnv()
 
 	db := OpenDB(cfg.DBPath)
 	app := vbeam.NewApplication("KaraokeMaker", db)

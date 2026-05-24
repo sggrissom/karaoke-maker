@@ -32,6 +32,10 @@ export interface ListJobsResponse {
     Jobs: Job[]
 }
 
+export interface DeleteJobRequest {
+    JobID: string
+}
+
 export async function SubmitJob(data: SubmitJobRequest): Promise<rpc.Response<SubmitJobResponse>> {
     return await rpc.call<SubmitJobResponse>('SubmitJob', JSON.stringify(data));
 }
@@ -42,5 +46,9 @@ export async function GetJob(data: GetJobRequest): Promise<rpc.Response<Job>> {
 
 export async function ListJobs(data: Empty): Promise<rpc.Response<ListJobsResponse>> {
     return await rpc.call<ListJobsResponse>('ListJobs', JSON.stringify(data));
+}
+
+export async function DeleteJob(data: DeleteJobRequest): Promise<rpc.Response<Empty>> {
+    return await rpc.call<Empty>('DeleteJob', JSON.stringify(data));
 }
 

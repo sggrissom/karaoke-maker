@@ -103,13 +103,17 @@ func watchDemucsProgress(r io.Reader, errBuf *bytes.Buffer, ch chan<- int) {
 	}
 }
 
-// watchYtDlpProgress reads yt-dlp stderr and sends download percentage values on ch.
-func watchYtDlpProgress(r io.Reader, ch chan<- int) {
+// watchYtDlpProgress reads yt-dlp stderr, writes all lines to errBuf, and sends download percentage values on ch.
+func watchYtDlpProgress(r io.Reader, errBuf *bytes.Buffer, ch chan<- int) {
 	defer close(ch)
 	scanner := bufio.NewScanner(r)
 	re := regexp.MustCompile(`\[download\]\s+([\d.]+)%`)
 	for scanner.Scan() {
-		if m := re.FindStringSubmatch(scanner.Text()); m != nil {
+		line := scanner.Text()
+		if line != "" {
+			errBuf.WriteString(line + "\n")
+		}
+		if m := re.FindStringSubmatch(line); m != nil {
 			if f, err := strconv.ParseFloat(m[1], 64); err == nil {
 				select {
 				case ch <- int(f):
@@ -179,7 +183,7 @@ func processJob(db *vbolt.DB, id string) {
 
 	if pipeErr == nil {
 		progressCh := make(chan int, 1)
-		go watchYtDlpProgress(stderrPipe, progressCh)
+		go watchYtDlpProgress(stderrPipe, &ytStderr, progressCh)
 
 		ticker := time.NewTicker(time.Second)
 		lastPct := 0

@@ -3,11 +3,14 @@ package backend
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"go.hasen.dev/vbeam"
 	"go.hasen.dev/vbolt"
+	"karaoke/cfg"
 )
 
 func RegisterMethods(app *vbeam.Application) {
@@ -21,6 +24,7 @@ func RegisterMethods(app *vbeam.Application) {
 	vbeam.RegisterProc(app, SubmitJob)
 	vbeam.RegisterProc(app, GetJob)
 	vbeam.RegisterProc(app, ListJobs)
+	vbeam.RegisterProc(app, DeleteJob)
 }
 
 type SubmitJobRequest struct {
@@ -79,6 +83,28 @@ func ListJobs(ctx *vbeam.Context, _ vbeam.Empty) (ListJobsResponse, error) {
 		return true
 	})
 	return ListJobsResponse{Jobs: jobs}, nil
+}
+
+type DeleteJobRequest struct {
+	JobID string
+}
+
+func DeleteJob(ctx *vbeam.Context, req DeleteJobRequest) (vbeam.Empty, error) {
+	var job Job
+	if !vbolt.Read(ctx.Tx, JobBucket, req.JobID, &job) {
+		return vbeam.Empty{}, errors.New("job not found")
+	}
+	if job.Status == StatusQueued || job.Status == StatusRunning {
+		return vbeam.Empty{}, errors.New("cannot delete an active job")
+	}
+
+	vbeam.UseWriteTx(ctx)
+	vbolt.Delete(ctx.Tx, JobBucket, req.JobID)
+	vbolt.TxCommit(ctx.Tx)
+
+	os.RemoveAll(filepath.Join(cfg.JobsDir, req.JobID))
+
+	return vbeam.Empty{}, nil
 }
 
 func isYouTubeURL(url string) bool {

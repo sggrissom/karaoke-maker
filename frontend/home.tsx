@@ -156,7 +156,17 @@ function renderJobCard(job: Job) {
                         {new Date(job.CreatedAt).toLocaleString()}
                     </div>
                 </div>
-                <StatusBadge status={job.Status} />
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                    <StatusBadge status={job.Status} />
+                    <button
+                        onClick={() => deleteJob(job.ID)}
+                        title="Delete"
+                        style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 4px",
+                                  color: "#9ca3af", fontSize: "16px", lineHeight: 1, borderRadius: "3px" }}
+                        onMouseEnter={(e) => { (e.target as HTMLElement).style.color = "#dc2626"; }}
+                        onMouseLeave={(e) => { (e.target as HTMLElement).style.color = "#9ca3af"; }}
+                    >✕</button>
+                </div>
             </div>
 
             {job.Status === "error" && (() => {
@@ -255,6 +265,14 @@ function Spinner() {
             <path d="M12 2a10 10 0 0 1 10 10" />
         </svg>
     );
+}
+
+async function deleteJob(jobID: string) {
+    const [, err] = await server.DeleteJob({ JobID: jobID });
+    if (err) return;
+    gJobs = gJobs.filter(j => j.ID !== jobID);
+    gExpandedErrors.delete(jobID);
+    core.scheduleRedraw();
 }
 
 async function submitJob() {

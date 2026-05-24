@@ -23,6 +23,22 @@ var jobQueue chan string
 
 func StartWorker(db *vbolt.DB) {
 	jobQueue = make(chan string, 100)
+
+	// Re-enqueue any jobs that were running or queued when the server last stopped.
+	vbolt.WithWriteTx(db, func(tx *vbolt.Tx) {
+		vbolt.IterateAll(tx, JobBucket, func(id string, job Job) bool {
+			if job.Status == StatusRunning || job.Status == StatusQueued {
+				job.Status = StatusQueued
+				job.Step = ""
+				job.Progress = 0
+				vbolt.Write(tx, JobBucket, id, &job)
+				jobQueue <- id
+			}
+			return true
+		})
+		vbolt.TxCommit(tx)
+	})
+
 	go runWorker(db)
 }
 
@@ -113,6 +129,7 @@ func processJob(db *vbolt.DB, id string) {
 
 	log.Printf("worker: starting job %s: %s", id, job.URL)
 	jobDir := filepath.Join(cfg.JobsDir, id)
+	os.RemoveAll(jobDir)
 	os.MkdirAll(jobDir, 0755)
 
 	updateJob(db, id, func(j *Job) {

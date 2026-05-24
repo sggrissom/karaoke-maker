@@ -16,6 +16,8 @@ export interface Job {
     ID: string
     URL: string
     Status: string
+    Step: string
+    Progress: number
     Title: string
     CreatedAt: string
     CompletedAt: string

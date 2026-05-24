@@ -18,6 +18,8 @@ type Job struct {
 	ID          string
 	URL         string
 	Status      string
+	Step        string // "downloading" | "separating" | ""
+	Progress    int    // 0-100
 	Title       string
 	AudioFile   string `json:"-"`
 	CreatedAt   time.Time
@@ -37,4 +39,6 @@ func packJob(j *Job, buf *vpack.Buffer) {
 	vpack.Time(&j.CreatedAt, buf)
 	vpack.Time(&j.CompletedAt, buf)
 	vpack.String(&j.Error, buf)
+	vpack.String(&j.Step, buf)
+	vpack.Int(&j.Progress, buf)
 }

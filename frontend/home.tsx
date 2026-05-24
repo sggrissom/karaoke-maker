@@ -82,15 +82,28 @@ function renderActiveJob() {
     const job = gJobs.find(j => j.ID === gActiveJobId);
     if (!job || job.Status === "done" || job.Status === "error") return null;
 
+    const label = job.Status === "queued"
+        ? "Queued…"
+        : job.Step === "downloading"
+            ? "Downloading audio…"
+            : job.Step === "separating"
+                ? `Separating stems${job.Title ? ` for "${job.Title}"` : ""}…`
+                : "Processing…";
+
     return (
         <div style={{ padding: "12px 16px", background: "#f0f9ff", border: "1px solid #bae6fd",
                       borderRadius: "6px", marginBottom: "24px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px",
+                          marginBottom: job.Progress > 0 ? "8px" : "0" }}>
                 <Spinner />
-                <span style={{ fontSize: "14px" }}>
-                    {job.Status === "queued" ? "Queued…" : job.Title ? `Separating stems for "${job.Title}"…` : "Downloading…"}
-                </span>
+                <span style={{ fontSize: "14px" }}>{label}</span>
             </div>
+            {job.Progress > 0 && (
+                <div style={{ height: "4px", background: "#e0f2fe", borderRadius: "2px", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${job.Progress}%`, background: "#2563eb",
+                                  borderRadius: "2px", transition: "width 0.5s ease-in-out" }} />
+                </div>
+            )}
         </div>
     );
 }
@@ -217,6 +230,8 @@ async function submitJob() {
         ID: resp.JobID,
         URL: url,
         Status: "queued",
+        Step: "",
+        Progress: 0,
         Title: "",
         CreatedAt: new Date().toISOString(),
         CompletedAt: new Date().toISOString(),

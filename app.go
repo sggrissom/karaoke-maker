@@ -65,5 +65,6 @@ func serveJobFile(db *vbolt.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	filePath := filepath.Join(cfg.JobsDir, jobID, "htdemucs", job.Title, filename)
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
 	http.ServeFile(w, r, filePath)
 }

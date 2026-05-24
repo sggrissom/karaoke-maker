@@ -195,11 +195,11 @@ function renderJobCard(job: Job) {
                     <audio controls src={`/jobs/${job.ID}/no_vocals.wav`}
                            style={{ width: "100%", marginBottom: "8px" }} />
                     <div style={{ display: "flex", gap: "8px" }}>
-                        <a href={`/jobs/${job.ID}/no_vocals.wav`} download
+                        <a href="#" onClick={() => { window.location.href = `/jobs/${job.ID}/no_vocals.wav`; }}
                            style={downloadLinkStyle}>
                             ↓ Karaoke (no vocals)
                         </a>
-                        <a href={`/jobs/${job.ID}/vocals.wav`} download
+                        <a href="#" onClick={() => { window.location.href = `/jobs/${job.ID}/vocals.wav`; }}
                            style={downloadLinkStyle}>
                             ↓ Vocals only
                         </a>

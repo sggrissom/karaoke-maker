@@ -13,6 +13,7 @@ let gSubmitting = false;
 let gSubmitError = "";
 let gActiveJobId = "";
 let gPollInterval: ReturnType<typeof setInterval> | null = null;
+let gHistoryOpen = false;
 
 export async function fetch(_route: string, _prefix: string) {
     gPollInterval && clearInterval(gPollInterval);
@@ -20,6 +21,7 @@ export async function fetch(_route: string, _prefix: string) {
     gActiveJobId = "";
     gSubmitError = "";
     gSubmitting = false;
+    gHistoryOpen = false;
 
     const [resp, err] = await server.ListJobs({});
     if (err) return rpc.err<Data>(err);
@@ -109,14 +111,29 @@ function renderActiveJob() {
 }
 
 function renderHistory() {
-    if (gJobs.length === 0) return null;
+    const historyJobs = gJobs.filter(j => j.Status === "done" || j.Status === "error");
+    if (historyJobs.length === 0) return null;
 
     return (
         <div>
-            <h2 style={{ fontSize: "16px", fontWeight: 600, marginBottom: "12px" }}>History</h2>
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                {gJobs.map(job => renderJobCard(job))}
-            </div>
+            <button
+                onClick={() => { gHistoryOpen = !gHistoryOpen; core.scheduleRedraw(); }}
+                style={{ display: "flex", alignItems: "center", gap: "6px", background: "none",
+                         border: "none", padding: "0", cursor: "pointer", marginBottom: "12px" }}
+            >
+                <span style={{ fontSize: "16px", fontWeight: 600 }}>History</span>
+                <span style={{ fontSize: "13px", color: "#6b7280" }}>({historyJobs.length})</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280"
+                     strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                     style={{ transform: gHistoryOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>
+                    <polyline points="6 9 12 15 18 9" />
+                </svg>
+            </button>
+            {gHistoryOpen && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {historyJobs.map(job => renderJobCard(job))}
+                </div>
+            )}
         </div>
     );
 }

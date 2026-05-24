@@ -22,6 +22,7 @@ export interface Job {
     CreatedAt: string
     CompletedAt: string
     Error: string
+    StepStartedAt: string
 }
 
 export interface Empty {

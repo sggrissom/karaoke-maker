@@ -84,6 +84,7 @@ function renderActiveJob() {
     const job = gJobs.find(j => j.ID === gActiveJobId);
     if (!job || job.Status === "done" || job.Status === "error") return null;
 
+    const elapsed = job.Step === "separating" ? formatElapsed(job.StepStartedAt) : "";
     const label = job.Status === "queued"
         ? "Queued…"
         : job.Step === "downloading"
@@ -98,7 +99,7 @@ function renderActiveJob() {
             <div style={{ display: "flex", alignItems: "center", gap: "10px",
                           marginBottom: job.Progress > 0 ? "8px" : "0" }}>
                 <Spinner />
-                <span style={{ fontSize: "14px" }}>{label}</span>
+                <span style={{ fontSize: "14px" }}>{label}{elapsed && <span style={{ color: "#6b7280", marginLeft: "8px" }}>{elapsed}</span>}</span>
             </div>
             {job.Progress > 0 && (
                 <div style={{ height: "4px", background: "#e0f2fe", borderRadius: "2px", overflow: "hidden" }}>
@@ -211,6 +212,15 @@ function StatusBadge({ status }: { status: string }) {
     );
 }
 
+function formatElapsed(startISO: string): string {
+    if (!startISO || startISO === "0001-01-01T00:00:00Z") return "";
+    const secs = Math.floor((Date.now() - new Date(startISO).getTime()) / 1000);
+    if (secs <= 0) return "";
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
 function Spinner() {
     return (
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -253,6 +263,7 @@ async function submitJob() {
         CreatedAt: new Date().toISOString(),
         CompletedAt: new Date().toISOString(),
         Error: "",
+        StepStartedAt: "",
     };
     gJobs.unshift(newJob);
 

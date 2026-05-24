@@ -47,6 +47,43 @@ func updateJob(db *vbolt.DB, id string, fn func(*Job)) {
 	})
 }
 
+// splitOnCRorLF splits on \n or \r so tqdm overwrite lines are treated as separate tokens.
+func splitOnCRorLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	for i, b := range data {
+		if b == '\n' || b == '\r' {
+			return i + 1, data[:i], nil
+		}
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
+// watchDemucsProgress reads Demucs stderr, logs it, writes to errBuf, and sends tqdm percentages on ch.
+func watchDemucsProgress(r io.Reader, errBuf *bytes.Buffer, ch chan<- int) {
+	defer close(ch)
+	scanner := bufio.NewScanner(r)
+	scanner.Split(splitOnCRorLF)
+	re := regexp.MustCompile(`(\d+)%\|`)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		fmt.Fprintln(os.Stderr, line)
+		errBuf.WriteString(line + "\n")
+		if m := re.FindStringSubmatch(line); m != nil {
+			if pct, err := strconv.Atoi(m[1]); err == nil {
+				select {
+				case ch <- pct:
+				default:
+				}
+			}
+		}
+	}
+}
+
 // watchYtDlpProgress reads yt-dlp stderr and sends download percentage values on ch.
 func watchYtDlpProgress(r io.Reader, ch chan<- int) {
 	defer close(ch)
@@ -167,15 +204,21 @@ func processJob(db *vbolt.DB, id string) {
 		j.AudioFile = audioFile
 		j.Step = "separating"
 		j.Progress = 20
+		j.StepStartedAt = time.Now()
 	})
 
 	// Step 2: separate stems
-	demucsArgs := []string{"-m", "demucs", "--two-stems=vocals", "--segment", "7", "--out", jobDir, audioFile}
+	// -u forces unbuffered output so tqdm progress lines reach the pipe promptly
+	demucsArgs := []string{"-u", "-m", "demucs", "--two-stems=vocals", "--segment", "7", "--out", jobDir, audioFile}
 	var demucsStderr bytes.Buffer
 	demucsCmd := exec.Command(cfg.PythonCmd, demucsArgs...)
 	demucsCmd.Stdout = os.Stdout
-	demucsCmd.Stderr = io.MultiWriter(os.Stderr, &demucsStderr)
 	demucsCmd.Env = append(os.Environ(), "OMP_NUM_THREADS=1")
+
+	stderrPipe2, pipeErr2 := demucsCmd.StderrPipe()
+	if pipeErr2 != nil {
+		demucsCmd.Stderr = io.MultiWriter(os.Stderr, &demucsStderr)
+	}
 
 	if err := demucsCmd.Start(); err != nil {
 		errMsg := fmt.Sprintf("separation failed: %s", err)
@@ -188,29 +231,57 @@ func processJob(db *vbolt.DB, id string) {
 		return
 	}
 
-	// Time-based progress: asymptotically approach 95% over ~2 min tau
-	stopProgress := make(chan struct{})
-	go func() {
-		start := time.Now()
-		t := time.NewTicker(time.Second)
-		defer t.Stop()
-		for {
+	var stopFallback chan struct{}
+	if pipeErr2 == nil {
+		progressCh2 := make(chan int, 1)
+		go watchDemucsProgress(stderrPipe2, &demucsStderr, progressCh2)
+
+		ticker2 := time.NewTicker(time.Second)
+		lastPct2 := 20
+		for open := true; open; {
 			select {
-			case <-stopProgress:
-				return
-			case <-t.C:
-				elapsed := time.Since(start).Seconds()
-				pct := 20 + int(75.0*(1.0-math.Exp(-elapsed/120.0)))
-				if pct > 95 {
-					pct = 95
+			case pct, ok := <-progressCh2:
+				if !ok {
+					open = false
+				} else {
+					overall := 20 + pct*75/100
+					if overall > 95 {
+						overall = 95
+					}
+					lastPct2 = overall
 				}
-				updateJob(db, id, func(j *Job) { j.Progress = pct })
+			case <-ticker2.C:
+				updateJob(db, id, func(j *Job) { j.Progress = lastPct2 })
 			}
 		}
-	}()
+		ticker2.Stop()
+	} else {
+		// Fallback: time-based exponential with a 600s time constant
+		stopFallback = make(chan struct{})
+		go func() {
+			start := time.Now()
+			t := time.NewTicker(time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-stopFallback:
+					return
+				case <-t.C:
+					elapsed := time.Since(start).Seconds()
+					pct := 20 + int(75.0*(1.0-math.Exp(-elapsed/600.0)))
+					if pct > 95 {
+						pct = 95
+					}
+					updateJob(db, id, func(j *Job) { j.Progress = pct })
+				}
+			}
+		}()
+	}
 
 	err := demucsCmd.Wait()
-	close(stopProgress)
+	if stopFallback != nil {
+		close(stopFallback)
+	}
 
 	if err != nil {
 		errMsg := fmt.Sprintf("separation failed: %s", strings.TrimSpace(demucsStderr.String()))

@@ -15,16 +15,17 @@ const (
 )
 
 type Job struct {
-	ID          string
-	URL         string
-	Status      string
-	Step        string // "downloading" | "separating" | ""
-	Progress    int    // 0-100
-	Title       string
-	AudioFile   string `json:"-"`
-	CreatedAt   time.Time
-	CompletedAt time.Time
-	Error       string
+	ID             string
+	URL            string
+	Status         string
+	Step           string // "downloading" | "separating" | ""
+	Progress       int    // 0-100
+	Title          string
+	AudioFile      string `json:"-"`
+	CreatedAt      time.Time
+	CompletedAt    time.Time
+	Error          string
+	StepStartedAt  time.Time
 }
 
 var DbInfo vbolt.Info
@@ -41,4 +42,5 @@ func packJob(j *Job, buf *vpack.Buffer) {
 	vpack.String(&j.Error, buf)
 	vpack.String(&j.Step, buf)
 	vpack.Int(&j.Progress, buf)
+	vpack.Time(&j.StepStartedAt, buf)
 }

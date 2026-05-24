@@ -87,6 +87,9 @@ func watchDemucsProgress(r io.Reader, errBuf *bytes.Buffer, ch chan<- int) {
 		if line == "" {
 			continue
 		}
+		if strings.Contains(line, "NNPACK") {
+			continue
+		}
 		fmt.Fprintln(os.Stderr, line)
 		errBuf.WriteString(line + "\n")
 		if m := re.FindStringSubmatch(line); m != nil {

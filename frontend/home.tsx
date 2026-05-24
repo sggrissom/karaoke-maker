@@ -14,6 +14,7 @@ let gSubmitError = "";
 let gActiveJobId = "";
 let gPollInterval: ReturnType<typeof setInterval> | null = null;
 let gHistoryOpen = false;
+let gExpandedErrors = new Set<string>();
 
 export async function fetch(_route: string, _prefix: string) {
     gPollInterval && clearInterval(gPollInterval);
@@ -158,12 +159,36 @@ function renderJobCard(job: Job) {
                 <StatusBadge status={job.Status} />
             </div>
 
-            {job.Status === "error" && (
-                <div style={{ marginTop: "8px", padding: "8px", background: "#fef2f2",
-                               borderRadius: "4px", fontSize: "13px", color: "#dc2626" }}>
-                    {job.Error}
-                </div>
-            )}
+            {job.Status === "error" && (() => {
+                const isLong = job.Error.includes("\n") || job.Error.length > 200;
+                const isExpanded = gExpandedErrors.has(job.ID);
+                const displayed = isLong && !isExpanded
+                    ? job.Error.split("\n")[0].slice(0, 200)
+                    : job.Error;
+                return (
+                    <div style={{ marginTop: "8px", padding: "8px", background: "#fef2f2",
+                                   borderRadius: "4px", fontSize: "13px", color: "#dc2626" }}>
+                        <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                                       fontFamily: "inherit" }}>
+                            {displayed}
+                        </pre>
+                        {isLong && (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    isExpanded ? gExpandedErrors.delete(job.ID) : gExpandedErrors.add(job.ID);
+                                    core.scheduleRedraw();
+                                }}
+                                style={{ marginTop: "4px", background: "none", border: "none",
+                                          padding: 0, cursor: "pointer", color: "#991b1b",
+                                          fontSize: "12px", textDecoration: "underline" }}
+                            >
+                                {isExpanded ? "Show less" : "Show more"}
+                            </button>
+                        )}
+                    </div>
+                );
+            })()}
 
             {job.Status === "done" && (
                 <div style={{ marginTop: "10px" }}>

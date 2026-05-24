@@ -2,6 +2,14 @@
 
 package cfg
 
+import "os"
+
 const IsRelease = false
 const DBPath    = ".serve/db.bolt"
 const StaticDir = ".serve/static/"
+
+var (
+	JobsDir   = ".serve/jobs"
+	YtDlpCmd  = os.ExpandEnv("$HOME/demucs-env/bin/yt-dlp")
+	PythonCmd = os.ExpandEnv("$HOME/demucs-env/bin/python")
+)

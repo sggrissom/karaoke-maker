@@ -146,7 +146,7 @@ func processJob(db *vbolt.DB, id string) {
 	})
 
 	// Step 1: download audio
-	ytArgs := []string{
+	baseYtArgs := []string{
 		"--extract-audio",
 		"--audio-format", "mp3",
 		"--audio-quality", "0",
@@ -159,67 +159,83 @@ func processJob(db *vbolt.DB, id string) {
 	}
 	if nodePath != "" {
 		log.Printf("worker: using node at %s", nodePath)
-		ytArgs = append(ytArgs, "--js-runtimes", "node:"+nodePath)
+		baseYtArgs = append(baseYtArgs, "--js-runtimes", "node:"+nodePath)
 	} else {
 		log.Println("worker: node not found, yt-dlp may fail without a JS runtime")
 	}
-	ytArgs = append(ytArgs, job.URL)
 
-	var ytStdout, ytStderr bytes.Buffer
-	ytCmd := exec.Command(cfg.YtDlpCmd, ytArgs...)
-	ytCmd.Stdout = &ytStdout
-	stderrPipe, pipeErr := ytCmd.StderrPipe()
-
-	if err := ytCmd.Start(); err != nil {
-		errMsg := fmt.Sprintf("download failed: %s", err)
-		log.Println("worker:", errMsg)
-		updateJob(db, id, func(j *Job) {
-			j.Status = StatusError
-			j.Error = errMsg
-			j.CompletedAt = time.Now()
-		})
-		return
+	// Try without cookies first, then fall back to browser cookie stores.
+	cookieBrowsers := []string{"", "chrome", "safari"}
+	if cfg.CookiesBrowser != "" {
+		cookieBrowsers = []string{cfg.CookiesBrowser}
 	}
 
-	if pipeErr == nil {
-		progressCh := make(chan int, 1)
-		go watchYtDlpProgress(stderrPipe, &ytStderr, progressCh)
+	var audioFile string
+	var lastErrMsg string
+	for _, browser := range cookieBrowsers {
+		ytArgs := append([]string(nil), baseYtArgs...)
+		if browser != "" {
+			ytArgs = append(ytArgs, "--cookies-from-browser", browser)
+		}
+		ytArgs = append(ytArgs, job.URL)
 
-		ticker := time.NewTicker(time.Second)
-		lastPct := 0
-		for open := true; open; {
-			select {
-			case pct, ok := <-progressCh:
-				if !ok {
-					open = false
-				} else {
-					lastPct = pct
+		var ytStdout, ytStderr bytes.Buffer
+		ytCmd := exec.Command(cfg.YtDlpCmd, ytArgs...)
+		ytCmd.Stdout = &ytStdout
+		stderrPipe, pipeErr := ytCmd.StderrPipe()
+
+		if err := ytCmd.Start(); err != nil {
+			lastErrMsg = fmt.Sprintf("download failed: %s", err)
+			log.Println("worker:", lastErrMsg)
+			continue
+		}
+
+		if pipeErr == nil {
+			progressCh := make(chan int, 1)
+			go watchYtDlpProgress(stderrPipe, &ytStderr, progressCh)
+
+			ticker := time.NewTicker(time.Second)
+			lastPct := 0
+			for open := true; open; {
+				select {
+				case pct, ok := <-progressCh:
+					if !ok {
+						open = false
+					} else {
+						lastPct = pct
+					}
+				case <-ticker.C:
+					p := lastPct / 5 // map 0-100% → 0-20 overall
+					updateJob(db, id, func(j *Job) { j.Progress = p })
 				}
-			case <-ticker.C:
-				p := lastPct / 5 // map 0-100% → 0-20 overall
-				updateJob(db, id, func(j *Job) { j.Progress = p })
 			}
+			ticker.Stop()
+		} else {
+			ytCmd.Stderr = &ytStderr
 		}
-		ticker.Stop()
-	} else {
-		ytCmd.Stderr = &ytStderr
+
+		if err := ytCmd.Wait(); err != nil {
+			lastErrMsg = fmt.Sprintf("download failed: %s", strings.TrimSpace(ytStderr.String()))
+			if lastErrMsg == "download failed: " {
+				lastErrMsg = fmt.Sprintf("download failed: %s", err)
+			}
+			log.Printf("worker: attempt with browser=%q failed: %s", browser, lastErrMsg)
+			continue
+		}
+
+		audioFile = strings.TrimSpace(ytStdout.String())
+		break
 	}
 
-	if err := ytCmd.Wait(); err != nil {
-		errMsg := fmt.Sprintf("download failed: %s", strings.TrimSpace(ytStderr.String()))
-		if errMsg == "download failed: " {
-			errMsg = fmt.Sprintf("download failed: %s", err)
-		}
-		log.Println("worker:", errMsg)
+	if audioFile == "" {
+		log.Println("worker:", lastErrMsg)
 		updateJob(db, id, func(j *Job) {
 			j.Status = StatusError
-			j.Error = errMsg
+			j.Error = lastErrMsg
 			j.CompletedAt = time.Now()
 		})
 		return
 	}
-
-	audioFile := strings.TrimSpace(ytStdout.String())
 	title := strings.TrimSuffix(filepath.Base(audioFile), ".mp3")
 	log.Printf("worker: downloaded %q", audioFile)
 

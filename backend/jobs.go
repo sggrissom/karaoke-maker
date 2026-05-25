@@ -32,6 +32,7 @@ var DbInfo vbolt.Info
 var JobBucket = vbolt.Bucket[string, Job](&DbInfo, "jobs", vpack.String, packJob)
 
 func packJob(j *Job, buf *vpack.Buffer) {
+	vpack.Version(1, buf)
 	vpack.String(&j.ID, buf)
 	vpack.String(&j.URL, buf)
 	vpack.String(&j.Status, buf)

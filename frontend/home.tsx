@@ -15,6 +15,7 @@ let gActiveJobId = "";
 let gPollInterval: ReturnType<typeof setInterval> | null = null;
 let gHistoryOpen = false;
 let gExpandedErrors = new Set<string>();
+let gDeletingIds = new Set<string>();
 
 export async function fetch(_route: string, _prefix: string) {
     gPollInterval && clearInterval(gPollInterval);
@@ -23,6 +24,7 @@ export async function fetch(_route: string, _prefix: string) {
     gSubmitError = "";
     gSubmitting = false;
     gHistoryOpen = false;
+    gDeletingIds.clear();
 
     const [resp, err] = await server.ListJobs({});
     if (err) return rpc.err<Data>(err);
@@ -161,9 +163,13 @@ function renderJobCard(job: Job) {
                     <button
                         onClick={() => deleteJob(job.ID)}
                         title="Delete"
-                        style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 4px",
-                                  color: "#9ca3af", fontSize: "16px", lineHeight: 1, borderRadius: "3px" }}
-                        onMouseEnter={(e) => { (e.target as HTMLElement).style.color = "#dc2626"; }}
+                        disabled={gDeletingIds.has(job.ID)}
+                        style={{ background: "none", border: "none",
+                                  cursor: gDeletingIds.has(job.ID) ? "default" : "pointer",
+                                  padding: "2px 4px", color: "#9ca3af", fontSize: "16px",
+                                  lineHeight: 1, borderRadius: "3px",
+                                  opacity: gDeletingIds.has(job.ID) ? 0.4 : 1 }}
+                        onMouseEnter={(e) => { if (!gDeletingIds.has(job.ID)) (e.target as HTMLElement).style.color = "#dc2626"; }}
                         onMouseLeave={(e) => { (e.target as HTMLElement).style.color = "#9ca3af"; }}
                     >✕</button>
                 </div>
@@ -268,8 +274,18 @@ function Spinner() {
 }
 
 async function deleteJob(jobID: string) {
+    if (gDeletingIds.has(jobID)) return;
+    gDeletingIds.add(jobID);
+    core.scheduleRedraw();
+
     const [, err] = await server.DeleteJob({ JobID: jobID });
-    if (err) return;
+    gDeletingIds.delete(jobID);
+
+    if (err) {
+        alert("Delete failed: " + err);
+        core.scheduleRedraw();
+        return;
+    }
     gJobs = gJobs.filter(j => j.ID !== jobID);
     gExpandedErrors.delete(jobID);
     core.scheduleRedraw();

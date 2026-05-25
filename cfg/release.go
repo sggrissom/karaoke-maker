@@ -10,5 +10,6 @@ var (
 	JobsDir   = "/srv/apps/karaoke/shared/jobs"
 	YtDlpCmd  = "/srv/apps/karaoke/shared/demucs-env/bin/yt-dlp"
 	PythonCmd = "/srv/apps/karaoke/shared/demucs-env/bin/python"
-	NodeCmd   = ""
+	NodeCmd        = ""
+	CookiesBrowser = ""
 )

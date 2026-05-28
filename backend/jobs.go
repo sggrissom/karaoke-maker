@@ -15,24 +15,26 @@ const (
 )
 
 type Job struct {
-	ID             string
-	URL            string
-	Status         string
-	Step           string // "downloading" | "separating" | ""
-	Progress       int    // 0-100
-	Title          string
-	AudioFile      string `json:"-"`
-	CreatedAt      time.Time
-	CompletedAt    time.Time
-	Error          string
-	StepStartedAt  time.Time
+	ID            string
+	URL           string
+	Status        string
+	Step          string // "downloading" | "separating" | "analyzing" | ""
+	Progress      int    // 0-100
+	Title         string
+	AudioFile     string `json:"-"`
+	CreatedAt     time.Time
+	CompletedAt   time.Time
+	Error         string
+	StepStartedAt time.Time
+	BPM           float64
+	Key           string
 }
 
 var DbInfo vbolt.Info
 var JobBucket = vbolt.Bucket[string, Job](&DbInfo, "jobs", vpack.String, packJob)
 
 func packJob(j *Job, buf *vpack.Buffer) {
-	vpack.Version(1, buf)
+	version := vpack.Version(2, buf)
 	vpack.String(&j.ID, buf)
 	vpack.String(&j.URL, buf)
 	vpack.String(&j.Status, buf)
@@ -44,4 +46,8 @@ func packJob(j *Job, buf *vpack.Buffer) {
 	vpack.String(&j.Step, buf)
 	vpack.Int(&j.Progress, buf)
 	vpack.Time(&j.StepStartedAt, buf)
+	if version >= 2 {
+		vpack.Float64(&j.BPM, buf)
+		vpack.String(&j.Key, buf)
+	}
 }

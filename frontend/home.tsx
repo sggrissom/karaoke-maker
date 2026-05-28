@@ -94,7 +94,9 @@ function renderActiveJob() {
             ? "Downloading audio…"
             : job.Step === "separating"
                 ? `Separating stems${job.Title ? ` for "${job.Title}"` : ""}…`
-                : "Processing…";
+                : job.Step === "analyzing"
+                    ? "Detecting BPM and key…"
+                    : "Processing…";
 
     return (
         <div style={{ padding: "12px 16px", background: "#f0f9ff", border: "1px solid #bae6fd",
@@ -208,6 +210,12 @@ function renderJobCard(job: Job) {
 
             {job.Status === "done" && (
                 <div style={{ marginTop: "10px" }}>
+                    {(job.BPM > 0 || job.Key) && (
+                        <div style={{ display: "flex", gap: "12px", marginBottom: "8px", fontSize: "13px", color: "#374151" }}>
+                            {job.BPM > 0 && <span><strong>BPM:</strong> {job.BPM}</span>}
+                            {job.Key && <span><strong>Key:</strong> {job.Key}</span>}
+                        </div>
+                    )}
                     <audio controls src={`/jobs/${job.ID}/no_vocals.wav`}
                            style={{ width: "100%", marginBottom: "8px" }} />
                     <div style={{ display: "flex", gap: "8px" }}>
@@ -323,6 +331,8 @@ async function submitJob() {
         CompletedAt: new Date().toISOString(),
         Error: "",
         StepStartedAt: "",
+        BPM: 0,
+        Key: "",
     };
     gJobs.unshift(newJob);
 

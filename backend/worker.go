@@ -3,6 +3,8 @@ package backend
 import (
 	"bufio"
 	"bytes"
+	_ "embed"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -19,6 +21,9 @@ import (
 	"go.hasen.dev/vbolt"
 	"karaoke/cfg"
 )
+
+//go:embed analyze.py
+var analyzeScript []byte
 
 var jobQueue chan string
 
@@ -415,6 +420,34 @@ func processJob(db *vbolt.DB, id string) {
 			j.CompletedAt = time.Now()
 		})
 		return
+	}
+
+	// Step 3: analyze BPM and key
+	updateJob(db, id, func(j *Job) {
+		j.Step = "analyzing"
+		j.Progress = 96
+	})
+
+	scriptPath := filepath.Join(jobDir, "analyze.py")
+	if writeErr := os.WriteFile(scriptPath, analyzeScript, 0644); writeErr == nil {
+		analyzeCmd := exec.Command(cfg.PythonCmd, scriptPath, audioFile)
+		analyzeCmd.Env = append(os.Environ(), "OMP_NUM_THREADS=1")
+		if out, analyzeErr := analyzeCmd.Output(); analyzeErr == nil {
+			var result struct {
+				BPM float64 `json:"bpm"`
+				Key string  `json:"key"`
+			}
+			if json.Unmarshal(out, &result) == nil {
+				updateJob(db, id, func(j *Job) {
+					j.BPM = result.BPM
+					j.Key = result.Key
+				})
+			} else {
+				log.Printf("worker: analyze parse error for job %s: %s", id, out)
+			}
+		} else {
+			log.Printf("worker: analyze failed for job %s: %s", id, analyzeErr)
+		}
 	}
 
 	log.Printf("worker: job %s done", id)

@@ -23,6 +23,8 @@ export interface Job {
     CompletedAt: string
     Error: string
     StepStartedAt: string
+    BPM: number
+    Key: string
 }
 
 export interface Empty {

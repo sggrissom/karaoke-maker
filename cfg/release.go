@@ -12,4 +12,5 @@ var (
 	PythonCmd = "/srv/apps/karaoke/shared/demucs-env/bin/python"
 	NodeCmd        = ""
 	CookiesBrowser = ""
+	CookiesFile    = ""
 )

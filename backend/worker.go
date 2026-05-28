@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -124,6 +125,24 @@ func watchYtDlpProgress(r io.Reader, errBuf *bytes.Buffer, ch chan<- int) {
 	}
 }
 
+// ytNeedsCookies returns true when the yt-dlp error text suggests that
+// authentication via browser cookies might help (age gate, login wall, etc.).
+func ytNeedsCookies(errText string) bool {
+	for _, phrase := range []string{
+		"Sign in", "sign in",
+		"age-restricted", "age restricted",
+		"members-only", "members only",
+		"This video requires payment",
+		"Private video",
+		"login", "Login",
+	} {
+		if strings.Contains(errText, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 func processJob(db *vbolt.DB, id string) {
 	var job Job
 	vbolt.WithReadTx(db, func(tx *vbolt.Tx) {
@@ -165,20 +184,54 @@ func processJob(db *vbolt.DB, id string) {
 		log.Println("worker: node not found, yt-dlp may fail without a JS runtime")
 	}
 
-	// Try without cookies first, then fall back to browser cookie stores.
-	cookieBrowsers := []string{"", "chrome", "safari"}
+	// Build the ordered list of download attempts.
+	// Each attempt is a set of extra args to append to baseYtArgs.
+	type attempt struct {
+		label     string
+		extraArgs []string
+		authOnly  bool // skip unless a prior attempt failed with an auth error
+	}
+	var attempts []attempt
 	if cfg.CookiesBrowser != "" {
-		cookieBrowsers = []string{cfg.CookiesBrowser}
+		attempts = []attempt{
+			{label: "browser:" + cfg.CookiesBrowser, extraArgs: []string{"--cookies-from-browser", cfg.CookiesBrowser}},
+		}
+	} else {
+		attempts = []attempt{
+			{label: "default", extraArgs: nil},
+			{label: "android", extraArgs: []string{"--extractor-args", "youtube:player_client=android"}},
+			{label: "tv_embedded", extraArgs: []string{"--extractor-args", "youtube:player_client=tv_embedded"}},
+		}
+		if cfg.CookiesFile != "" {
+			attempts = append(attempts,
+				attempt{label: "cookies+default", authOnly: true, extraArgs: []string{"--cookies", cfg.CookiesFile}},
+				attempt{label: "cookies+android", authOnly: true, extraArgs: []string{"--cookies", cfg.CookiesFile, "--extractor-args", "youtube:player_client=android"}},
+			)
+		} else {
+			// Browser-cookie fallbacks only make sense on a dev machine.
+			browserFallbacks := []string{"chrome", "firefox"}
+			if runtime.GOOS == "darwin" {
+				browserFallbacks = []string{"chrome", "safari"}
+			}
+			for _, br := range browserFallbacks {
+				attempts = append(attempts, attempt{
+					label:    "browser:" + br,
+					authOnly: true,
+					extraArgs: []string{"--cookies-from-browser", br},
+				})
+			}
+		}
 	}
 
 	var audioFile string
 	var audioFiles []string
 	var lastErrMsg string
-	for _, browser := range cookieBrowsers {
-		ytArgs := append([]string(nil), baseYtArgs...)
-		if browser != "" {
-			ytArgs = append(ytArgs, "--cookies-from-browser", browser)
+	needsAuth := false
+	for _, att := range attempts {
+		if att.authOnly && !needsAuth {
+			continue
 		}
+		ytArgs := append(append([]string(nil), baseYtArgs...), att.extraArgs...)
 		ytArgs = append(ytArgs, job.URL)
 
 		var ytStdout, ytStderr bytes.Buffer
@@ -217,11 +270,15 @@ func processJob(db *vbolt.DB, id string) {
 		}
 
 		if err := ytCmd.Wait(); err != nil {
-			lastErrMsg = fmt.Sprintf("download failed: %s", strings.TrimSpace(ytStderr.String()))
+			errText := strings.TrimSpace(ytStderr.String())
+			lastErrMsg = fmt.Sprintf("download failed: %s", errText)
 			if lastErrMsg == "download failed: " {
 				lastErrMsg = fmt.Sprintf("download failed: %s", err)
 			}
-			log.Printf("worker: attempt with browser=%q failed: %s", browser, lastErrMsg)
+			log.Printf("worker: attempt %q failed: %s", att.label, lastErrMsg)
+			if ytNeedsCookies(errText) {
+				needsAuth = true
+			}
 			continue
 		}
 

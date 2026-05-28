@@ -14,4 +14,5 @@ var (
 	PythonCmd = os.ExpandEnv("$HOME/demucs-env/bin/python")
 	NodeCmd        = os.ExpandEnv("$HOME/.local/share/mise/shims/node")
 	CookiesBrowser = ""
+	CookiesFile    = ""
 )

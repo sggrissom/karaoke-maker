@@ -147,6 +147,7 @@ func processJob(db *vbolt.DB, id string) {
 
 	// Step 1: download audio
 	baseYtArgs := []string{
+		"--no-playlist",
 		"--extract-audio",
 		"--audio-format", "mp3",
 		"--audio-quality", "0",
@@ -171,6 +172,7 @@ func processJob(db *vbolt.DB, id string) {
 	}
 
 	var audioFile string
+	var audioFiles []string
 	var lastErrMsg string
 	for _, browser := range cookieBrowsers {
 		ytArgs := append([]string(nil), baseYtArgs...)
@@ -223,21 +225,21 @@ func processJob(db *vbolt.DB, id string) {
 			continue
 		}
 
-		audioFile = strings.TrimSpace(ytStdout.String())
-		break
+		// Collect all downloaded file paths (playlists print one path per line).
+		for _, line := range strings.Split(ytStdout.String(), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				audioFiles = append(audioFiles, line)
+			}
+		}
+		if len(audioFiles) > 0 {
+			audioFile = audioFiles[0]
+			break
+		}
 	}
 
-	if audioFile == "" {
-		log.Println("worker:", lastErrMsg)
-		updateJob(db, id, func(j *Job) {
-			j.Status = StatusError
-			j.Error = lastErrMsg
-			j.CompletedAt = time.Now()
-		})
-		return
-	}
 	title := strings.TrimSuffix(filepath.Base(audioFile), ".mp3")
-	log.Printf("worker: downloaded %q", audioFile)
+	log.Printf("worker: downloaded %d file(s), first: %q", len(audioFiles), audioFile)
 
 	updateJob(db, id, func(j *Job) {
 		j.Title = title
@@ -249,7 +251,7 @@ func processJob(db *vbolt.DB, id string) {
 
 	// Step 2: separate stems
 	// -u forces unbuffered output so tqdm progress lines reach the pipe promptly
-	demucsArgs := []string{"-u", "-m", "demucs", "--two-stems=vocals", "--segment", "7", "--out", jobDir, audioFile}
+	demucsArgs := append([]string{"-u", "-m", "demucs", "--two-stems=vocals", "--segment", "7", "--out", jobDir}, audioFiles...)
 	var demucsStderr bytes.Buffer
 	demucsCmd := exec.Command(cfg.PythonCmd, demucsArgs...)
 	demucsCmd.Stdout = os.Stdout

@@ -238,6 +238,30 @@ func processJob(db *vbolt.DB, id string) {
 		}
 	}
 
+	if len(audioFiles) == 0 {
+		// yt-dlp may have succeeded but not printed to stdout; scan jobDir as fallback.
+		entries, _ := os.ReadDir(jobDir)
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".mp3") {
+				audioFiles = append(audioFiles, filepath.Join(jobDir, e.Name()))
+			}
+		}
+	}
+
+	if len(audioFiles) == 0 {
+		if lastErrMsg == "" {
+			lastErrMsg = "download failed: no audio files found"
+		}
+		log.Println("worker:", lastErrMsg)
+		updateJob(db, id, func(j *Job) {
+			j.Status = StatusError
+			j.Error = lastErrMsg
+			j.CompletedAt = time.Now()
+		})
+		return
+	}
+
+	audioFile = audioFiles[0]
 	title := strings.TrimSuffix(filepath.Base(audioFile), ".mp3")
 	log.Printf("worker: downloaded %d file(s), first: %q", len(audioFiles), audioFile)
 

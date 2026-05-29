@@ -2,6 +2,7 @@ import * as rpc from "vlens/rpc"
 
 export interface SubmitJobRequest {
     URL: string
+    PitchShift: number
 }
 
 export interface SubmitJobResponse {
@@ -25,6 +26,7 @@ export interface Job {
     StepStartedAt: string
     BPM: number
     Key: string
+    PitchShift: number
 }
 
 export interface Empty {

@@ -424,13 +424,32 @@ func processJob(db *vbolt.DB, id string) {
 		return
 	}
 
-	// Step 3: convert WAV stems to MP3
+	// Step 3: pitch shift stems (if requested)
+	stemDir := filepath.Join(jobDir, "htdemucs", title)
+	if job.PitchShift != 0 {
+		updateJob(db, id, func(j *Job) {
+			j.Step = "shifting"
+			j.Progress = 95
+		})
+		for _, stem := range []string{"vocals", "no_vocals"} {
+			wavPath := filepath.Join(stemDir, stem+".wav")
+			shiftedPath := filepath.Join(stemDir, stem+"_shifted.wav")
+			rbCmd := exec.Command("rubberband", "-p", strconv.Itoa(job.PitchShift), "-c", "6", wavPath, shiftedPath)
+			if rbErr := rbCmd.Run(); rbErr != nil {
+				log.Printf("worker: rubberband %s failed: %s", stem, rbErr)
+			} else {
+				os.Remove(wavPath)
+				os.Rename(shiftedPath, wavPath)
+			}
+		}
+	}
+
+	// Step 4: convert WAV stems to MP3
 	updateJob(db, id, func(j *Job) {
 		j.Step = "converting"
 		j.Progress = 96
 	})
 
-	stemDir := filepath.Join(jobDir, "htdemucs", title)
 	for _, stem := range []string{"vocals", "no_vocals"} {
 		wavPath := filepath.Join(stemDir, stem+".wav")
 		mp3Path := filepath.Join(stemDir, stem+".mp3")
@@ -442,7 +461,7 @@ func processJob(db *vbolt.DB, id string) {
 		}
 	}
 
-	// Step 4: analyze BPM and key
+	// Step 5: analyze BPM and key
 	updateJob(db, id, func(j *Job) {
 		j.Step = "analyzing"
 		j.Progress = 98

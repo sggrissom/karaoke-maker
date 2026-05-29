@@ -9,6 +9,7 @@ type Data = { jobs: Job[] };
 
 let gJobs: Job[] = [];
 let gUrlInput = "";
+let gPitchShift = 0;
 let gSubmitting = false;
 let gSubmitError = "";
 let gActiveJobId = "";
@@ -23,6 +24,7 @@ export async function fetch(_route: string, _prefix: string) {
     gActiveJobId = "";
     gSubmitError = "";
     gSubmitting = false;
+    gPitchShift = 0;
     gHistoryOpen = false;
     gDeletingIds.clear();
 
@@ -51,33 +53,61 @@ export function view(_route: string, _prefix: string, _data: Data): preact.Compo
     );
 }
 
+const SEMITONE_OPTIONS = [-6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6];
+
+function semitonelabel(n: number): string {
+    if (n === 0) return "0 (original)";
+    return (n > 0 ? `+${n}` : `${n}`) + " st";
+}
+
 function renderForm() {
     const activeJob = gJobs.find(j => j.ID === gActiveJobId);
     const busy = gSubmitting || (activeJob && (activeJob.Status === "queued" || activeJob.Status === "running"));
 
     return (
-        <div style={{ display: "flex", gap: "8px", marginBottom: "24px" }}>
-            <input
-                type="text"
-                placeholder="YouTube URL"
-                value={gUrlInput}
-                style={{ flex: 1, padding: "8px 12px", fontSize: "14px", border: "1px solid #ccc", borderRadius: "4px" }}
-                onInput={(e) => {
-                    gUrlInput = (e.target as HTMLInputElement).value;
-                    core.scheduleRedraw();
-                }}
-                onKeyDown={(e) => { if (e.key === "Enter" && !busy) submitJob(); }}
-            />
-            <button
-                onClick={() => { if (!busy) submitJob(); }}
-                disabled={!!busy || !gUrlInput.trim()}
-                style={{ padding: "8px 16px", fontSize: "14px", cursor: busy ? "default" : "pointer",
-                         background: "#2563eb", color: "white", border: "none", borderRadius: "4px",
-                         opacity: (busy || !gUrlInput.trim()) ? 0.5 : 1 }}
-            >
-                {gSubmitting ? "Submitting…" : "Make Karaoke"}
-            </button>
-            {gSubmitError && <span style={{ color: "red", alignSelf: "center", fontSize: "13px" }}>{gSubmitError}</span>}
+        <div style={{ marginBottom: "24px" }}>
+            <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+                <input
+                    type="text"
+                    placeholder="YouTube URL"
+                    value={gUrlInput}
+                    style={{ flex: 1, padding: "8px 12px", fontSize: "14px", border: "1px solid #ccc", borderRadius: "4px" }}
+                    onInput={(e) => {
+                        gUrlInput = (e.target as HTMLInputElement).value;
+                        core.scheduleRedraw();
+                    }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !busy) submitJob(); }}
+                />
+                <button
+                    onClick={() => { if (!busy) submitJob(); }}
+                    disabled={!!busy || !gUrlInput.trim()}
+                    style={{ padding: "8px 16px", fontSize: "14px", cursor: busy ? "default" : "pointer",
+                             background: "#2563eb", color: "white", border: "none", borderRadius: "4px",
+                             opacity: (busy || !gUrlInput.trim()) ? 0.5 : 1 }}
+                >
+                    {gSubmitting ? "Submitting…" : "Make Karaoke"}
+                </button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <label style={{ fontSize: "13px", color: "#374151", whiteSpace: "nowrap" }}>
+                    Pitch shift:
+                </label>
+                <select
+                    value={gPitchShift}
+                    disabled={!!busy}
+                    style={{ fontSize: "13px", padding: "4px 8px", border: "1px solid #d1d5db",
+                             borderRadius: "4px", background: "white", cursor: busy ? "default" : "pointer" }}
+                    onChange={(e) => {
+                        gPitchShift = parseInt((e.target as HTMLSelectElement).value, 10);
+                        core.scheduleRedraw();
+                    }}
+                >
+                    {SEMITONE_OPTIONS.map(n => (
+                        <option key={n} value={n}>{semitonelabel(n)}</option>
+                    ))}
+                </select>
+                {gSubmitError && <span style={{ color: "red", fontSize: "13px" }}>{gSubmitError}</span>}
+            </div>
         </div>
     );
 }
@@ -94,9 +124,11 @@ function renderActiveJob() {
             ? "Downloading audio…"
             : job.Step === "separating"
                 ? `Separating stems${job.Title ? ` for "${job.Title}"` : ""}…`
-                : job.Step === "analyzing"
-                    ? "Detecting BPM and key…"
-                    : "Processing…";
+                : job.Step === "shifting"
+                    ? "Shifting pitch…"
+                    : job.Step === "analyzing"
+                        ? "Detecting BPM and key…"
+                        : "Processing…";
 
     return (
         <div style={{ padding: "12px 16px", background: "#f0f9ff", border: "1px solid #bae6fd",
@@ -210,10 +242,11 @@ function renderJobCard(job: Job) {
 
             {job.Status === "done" && (
                 <div style={{ marginTop: "10px" }}>
-                    {(job.BPM > 0 || job.Key) && (
+                    {(job.BPM > 0 || job.Key || job.PitchShift !== 0) && (
                         <div style={{ display: "flex", gap: "12px", marginBottom: "8px", fontSize: "13px", color: "#374151" }}>
                             {job.BPM > 0 && <span><strong>BPM:</strong> {job.BPM}</span>}
                             {job.Key && <span><strong>Key:</strong> {job.Key}</span>}
+                            {job.PitchShift !== 0 && <span><strong>Pitch:</strong> {job.PitchShift > 0 ? `+${job.PitchShift}` : job.PitchShift} st</span>}
                         </div>
                     )}
                     <audio controls src={`/jobs/${job.ID}/no_vocals.mp3`}
@@ -307,7 +340,7 @@ async function submitJob() {
     gSubmitError = "";
     core.scheduleRedraw();
 
-    const [resp, err] = await server.SubmitJob({ URL: url });
+    const [resp, err] = await server.SubmitJob({ URL: url, PitchShift: gPitchShift });
     gSubmitting = false;
 
     if (err || !resp) {
@@ -317,6 +350,7 @@ async function submitJob() {
     }
 
     gUrlInput = "";
+    gPitchShift = 0;
     gActiveJobId = resp.JobID;
 
     // Optimistically add the job to the list (skip if server returned an existing job via dedup)
@@ -334,6 +368,7 @@ async function submitJob() {
             StepStartedAt: "",
             BPM: 0,
             Key: "",
+            PitchShift: gPitchShift,
         };
         gJobs.unshift(newJob);
     } else {

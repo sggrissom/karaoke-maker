@@ -28,7 +28,8 @@ func RegisterMethods(app *vbeam.Application) {
 }
 
 type SubmitJobRequest struct {
-	URL string
+	URL        string
+	PitchShift int // semitones, -12 to +12
 }
 
 type SubmitJobResponse struct {
@@ -43,10 +44,16 @@ func SubmitJob(ctx *vbeam.Context, req SubmitJobRequest) (SubmitJobResponse, err
 		return SubmitJobResponse{}, errors.New("URL must be a YouTube URL")
 	}
 
-	// Dedup: return existing job if the URL is already queued, running, or done
+	if req.PitchShift < -12 {
+		req.PitchShift = -12
+	} else if req.PitchShift > 12 {
+		req.PitchShift = 12
+	}
+
+	// Dedup: return existing job if the URL + pitch shift is already queued, running, or done
 	var existingID string
 	vbolt.IterateAll(ctx.Tx, JobBucket, func(id string, job Job) bool {
-		if job.URL == req.URL && job.Status != StatusError {
+		if job.URL == req.URL && job.PitchShift == req.PitchShift && job.Status != StatusError {
 			existingID = id
 			return false
 		}
@@ -58,10 +65,11 @@ func SubmitJob(ctx *vbeam.Context, req SubmitJobRequest) (SubmitJobResponse, err
 
 	id := fmt.Sprintf("%020d", time.Now().UnixNano())
 	job := Job{
-		ID:        id,
-		URL:       req.URL,
-		Status:    StatusQueued,
-		CreatedAt: time.Now(),
+		ID:         id,
+		URL:        req.URL,
+		PitchShift: req.PitchShift,
+		Status:     StatusQueued,
+		CreatedAt:  time.Now(),
 	}
 
 	vbeam.UseWriteTx(ctx)

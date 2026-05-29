@@ -28,13 +28,14 @@ type Job struct {
 	StepStartedAt time.Time
 	BPM           float64
 	Key           string
+	PitchShift    int // semitones, -12 to +12
 }
 
 var DbInfo vbolt.Info
 var JobBucket = vbolt.Bucket[string, Job](&DbInfo, "jobs", vpack.String, packJob)
 
 func packJob(j *Job, buf *vpack.Buffer) {
-	version := vpack.Version(2, buf)
+	version := vpack.Version(3, buf)
 	vpack.String(&j.ID, buf)
 	vpack.String(&j.URL, buf)
 	vpack.String(&j.Status, buf)
@@ -49,5 +50,8 @@ func packJob(j *Job, buf *vpack.Buffer) {
 	if version >= 2 {
 		vpack.Float64(&j.BPM, buf)
 		vpack.String(&j.Key, buf)
+	}
+	if version >= 3 {
+		vpack.Int(&j.PitchShift, buf)
 	}
 }

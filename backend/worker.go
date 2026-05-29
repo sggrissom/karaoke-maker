@@ -45,7 +45,9 @@ func StartWorker(db *vbolt.DB) {
 		vbolt.TxCommit(tx)
 	})
 
-	go runWorker(db)
+	for i := 0; i < cfg.Workers; i++ {
+		go runWorker(db)
+	}
 }
 
 func EnqueueJob(id string) {

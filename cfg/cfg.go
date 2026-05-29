@@ -1,6 +1,9 @@
 package cfg
 
-import "os"
+import (
+	"os"
+	"strconv"
+)
 
 const Backport = 12868
 
@@ -17,5 +20,10 @@ func ApplyEnv() {
 	}
 	if v := os.Getenv("NODE_CMD"); v != "" {
 		NodeCmd = v
+	}
+	if v := os.Getenv("WORKER_COUNT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			Workers = n
+		}
 	}
 }

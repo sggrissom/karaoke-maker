@@ -216,14 +216,14 @@ function renderJobCard(job: Job) {
                             {job.Key && <span><strong>Key:</strong> {job.Key}</span>}
                         </div>
                     )}
-                    <audio controls src={`/jobs/${job.ID}/no_vocals.wav`}
+                    <audio controls src={`/jobs/${job.ID}/no_vocals.mp3`}
                            style={{ width: "100%", marginBottom: "8px" }} />
                     <div style={{ display: "flex", gap: "8px" }}>
-                        <a href="#" onClick={() => { window.location.href = `/jobs/${job.ID}/no_vocals.wav`; }}
+                        <a href="#" onClick={() => { window.location.href = `/jobs/${job.ID}/no_vocals.mp3`; }}
                            style={downloadLinkStyle}>
                             ↓ Karaoke (no vocals)
                         </a>
-                        <a href="#" onClick={() => { window.location.href = `/jobs/${job.ID}/vocals.wav`; }}
+                        <a href="#" onClick={() => { window.location.href = `/jobs/${job.ID}/vocals.mp3`; }}
                            style={downloadLinkStyle}>
                             ↓ Vocals only
                         </a>
@@ -319,22 +319,27 @@ async function submitJob() {
     gUrlInput = "";
     gActiveJobId = resp.JobID;
 
-    // Optimistically add the job to the list
-    const newJob: Job = {
-        ID: resp.JobID,
-        URL: url,
-        Status: "queued",
-        Step: "",
-        Progress: 0,
-        Title: "",
-        CreatedAt: new Date().toISOString(),
-        CompletedAt: new Date().toISOString(),
-        Error: "",
-        StepStartedAt: "",
-        BPM: 0,
-        Key: "",
-    };
-    gJobs.unshift(newJob);
+    // Optimistically add the job to the list (skip if server returned an existing job via dedup)
+    if (!gJobs.find(j => j.ID === resp.JobID)) {
+        const newJob: Job = {
+            ID: resp.JobID,
+            URL: url,
+            Status: "queued",
+            Step: "",
+            Progress: 0,
+            Title: "",
+            CreatedAt: new Date().toISOString(),
+            CompletedAt: new Date().toISOString(),
+            Error: "",
+            StepStartedAt: "",
+            BPM: 0,
+            Key: "",
+        };
+        gJobs.unshift(newJob);
+    } else {
+        // Dedup returned an existing job; open history so user sees it
+        gHistoryOpen = true;
+    }
 
     startPolling();
     core.scheduleRedraw();

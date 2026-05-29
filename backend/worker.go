@@ -422,10 +422,28 @@ func processJob(db *vbolt.DB, id string) {
 		return
 	}
 
-	// Step 3: analyze BPM and key
+	// Step 3: convert WAV stems to MP3
+	updateJob(db, id, func(j *Job) {
+		j.Step = "converting"
+		j.Progress = 96
+	})
+
+	stemDir := filepath.Join(jobDir, "htdemucs", title)
+	for _, stem := range []string{"vocals", "no_vocals"} {
+		wavPath := filepath.Join(stemDir, stem+".wav")
+		mp3Path := filepath.Join(stemDir, stem+".mp3")
+		ffCmd := exec.Command("ffmpeg", "-y", "-i", wavPath, "-b:a", "320k", mp3Path)
+		if ffErr := ffCmd.Run(); ffErr != nil {
+			log.Printf("worker: ffmpeg %s failed: %s", stem, ffErr)
+		} else {
+			os.Remove(wavPath)
+		}
+	}
+
+	// Step 4: analyze BPM and key
 	updateJob(db, id, func(j *Job) {
 		j.Step = "analyzing"
-		j.Progress = 96
+		j.Progress = 98
 	})
 
 	scriptPath := filepath.Join(jobDir, "analyze.py")

@@ -43,6 +43,19 @@ func SubmitJob(ctx *vbeam.Context, req SubmitJobRequest) (SubmitJobResponse, err
 		return SubmitJobResponse{}, errors.New("URL must be a YouTube URL")
 	}
 
+	// Dedup: return existing job if the URL is already queued, running, or done
+	var existingID string
+	vbolt.IterateAll(ctx.Tx, JobBucket, func(id string, job Job) bool {
+		if job.URL == req.URL && job.Status != StatusError {
+			existingID = id
+			return false
+		}
+		return true
+	})
+	if existingID != "" {
+		return SubmitJobResponse{JobID: existingID}, nil
+	}
+
 	id := fmt.Sprintf("%020d", time.Now().UnixNano())
 	job := Job{
 		ID:        id,

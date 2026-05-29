@@ -50,7 +50,11 @@ func serveJobFile(db *vbolt.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jobID, filename := parts[0], parts[1]
-	if filename != "no_vocals.wav" && filename != "vocals.wav" {
+	allowed := map[string]bool{
+		"no_vocals.wav": true, "vocals.wav": true,
+		"no_vocals.mp3": true, "vocals.mp3": true,
+	}
+	if !allowed[filename] {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}

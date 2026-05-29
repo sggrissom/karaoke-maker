@@ -427,9 +427,10 @@ func processJob(db *vbolt.DB, id string) {
 		return
 	}
 
-	// Step 3: pitch shift stems (if requested)
+	// Step 3: pitch shift and/or speed adjustment (if requested)
 	stemDir := filepath.Join(jobDir, "htdemucs", title)
-	if job.PitchShift != 0 {
+	needsSpeed := job.SpeedAdjust != 0 && job.SpeedAdjust != 1.0
+	if job.PitchShift != 0 || needsSpeed {
 		updateJob(db, id, func(j *Job) {
 			j.Step = "shifting"
 			j.Progress = 95
@@ -437,7 +438,17 @@ func processJob(db *vbolt.DB, id string) {
 		for _, stem := range []string{"vocals", "no_vocals"} {
 			wavPath := filepath.Join(stemDir, stem+".wav")
 			shiftedPath := filepath.Join(stemDir, stem+"_shifted.wav")
-			rbCmd := exec.Command("rubberband", "-p", strconv.Itoa(job.PitchShift), "-c", "6", wavPath, shiftedPath)
+			rbArgs := []string{"-c", "6"}
+			if job.PitchShift != 0 {
+				rbArgs = append(rbArgs, "-p", strconv.Itoa(job.PitchShift))
+			}
+			if needsSpeed {
+				// rubberband -t is the time-stretch ratio (duration multiplier); speed = 1/ratio
+				ratio := 1.0 / job.SpeedAdjust
+				rbArgs = append(rbArgs, "-t", strconv.FormatFloat(ratio, 'f', 4, 64))
+			}
+			rbArgs = append(rbArgs, wavPath, shiftedPath)
+			rbCmd := exec.Command("rubberband", rbArgs...)
 			if rbErr := rbCmd.Run(); rbErr != nil {
 				log.Printf("worker: rubberband %s failed: %s", stem, rbErr)
 			} else {

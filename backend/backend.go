@@ -28,12 +28,26 @@ func RegisterMethods(app *vbeam.Application) {
 }
 
 type SubmitJobRequest struct {
-	URL        string
-	PitchShift int // semitones, -12 to +12
+	URL         string
+	PitchShift  int     // semitones, -12 to +12
+	SpeedAdjust float64 // playback speed multiplier, 0 or 1.0 = no change
 }
 
 type SubmitJobResponse struct {
 	JobID string
+}
+
+func normalizeSpeed(s float64) float64 {
+	if s == 0 {
+		return 1.0
+	}
+	if s < 0.25 {
+		return 0.25
+	}
+	if s > 4.0 {
+		return 4.0
+	}
+	return s
 }
 
 func SubmitJob(ctx *vbeam.Context, req SubmitJobRequest) (SubmitJobResponse, error) {
@@ -49,11 +63,13 @@ func SubmitJob(ctx *vbeam.Context, req SubmitJobRequest) (SubmitJobResponse, err
 	} else if req.PitchShift > 12 {
 		req.PitchShift = 12
 	}
+	req.SpeedAdjust = normalizeSpeed(req.SpeedAdjust)
 
-	// Dedup: return existing job if the URL + pitch shift is already queued, running, or done
+	// Dedup: return existing job if the URL + pitch shift + speed is already queued, running, or done
 	var existingID string
 	vbolt.IterateAll(ctx.Tx, JobBucket, func(id string, job Job) bool {
-		if job.URL == req.URL && job.PitchShift == req.PitchShift && job.Status != StatusError {
+		if job.URL == req.URL && job.PitchShift == req.PitchShift &&
+			normalizeSpeed(job.SpeedAdjust) == req.SpeedAdjust && job.Status != StatusError {
 			existingID = id
 			return false
 		}
@@ -65,11 +81,12 @@ func SubmitJob(ctx *vbeam.Context, req SubmitJobRequest) (SubmitJobResponse, err
 
 	id := fmt.Sprintf("%020d", time.Now().UnixNano())
 	job := Job{
-		ID:         id,
-		URL:        req.URL,
-		PitchShift: req.PitchShift,
-		Status:     StatusQueued,
-		CreatedAt:  time.Now(),
+		ID:          id,
+		URL:         req.URL,
+		PitchShift:  req.PitchShift,
+		SpeedAdjust: req.SpeedAdjust,
+		Status:      StatusQueued,
+		CreatedAt:   time.Now(),
 	}
 
 	vbeam.UseWriteTx(ctx)

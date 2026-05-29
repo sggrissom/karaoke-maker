@@ -3,6 +3,7 @@ import * as rpc from "vlens/rpc"
 export interface SubmitJobRequest {
     URL: string
     PitchShift: number
+    SpeedAdjust: number
 }
 
 export interface SubmitJobResponse {
@@ -28,6 +29,7 @@ export interface Job {
     Key: string
     PitchShift: number
     Lyrics: string
+    SpeedAdjust: number
 }
 
 export interface Empty {

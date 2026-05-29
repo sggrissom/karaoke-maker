@@ -10,6 +10,7 @@ type Data = { jobs: Job[] };
 let gJobs: Job[] = [];
 let gUrlInput = "";
 let gPitchShift = 0;
+let gSpeedAdjust = 1.0;
 let gSubmitting = false;
 let gSubmitError = "";
 let gActiveJobId = "";
@@ -26,6 +27,7 @@ export async function fetch(_route: string, _prefix: string) {
     gSubmitError = "";
     gSubmitting = false;
     gPitchShift = 0;
+    gSpeedAdjust = 1.0;
     gHistoryOpen = false;
     gExpandedLyrics.clear();
     gDeletingIds.clear();
@@ -56,10 +58,16 @@ export function view(_route: string, _prefix: string, _data: Data): preact.Compo
 }
 
 const SEMITONE_OPTIONS = [-6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6];
+const SPEED_OPTIONS = [0.5, 0.6, 0.75, 0.85, 0.9, 1.0, 1.1, 1.25, 1.5, 2.0];
 
 function semitonelabel(n: number): string {
     if (n === 0) return "0 (original)";
     return (n > 0 ? `+${n}` : `${n}`) + " st";
+}
+
+function speedLabel(s: number): string {
+    if (s === 1.0) return "1× (original)";
+    return s + "×";
 }
 
 function renderForm() {
@@ -90,24 +98,45 @@ function renderForm() {
                     {gSubmitting ? "Submitting…" : "Make Karaoke"}
                 </button>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <label style={{ fontSize: "13px", color: "#374151", whiteSpace: "nowrap" }}>
-                    Pitch shift:
-                </label>
-                <select
-                    value={gPitchShift}
-                    disabled={!!busy}
-                    style={{ fontSize: "13px", padding: "4px 8px", border: "1px solid #d1d5db",
-                             borderRadius: "4px", background: "white", cursor: busy ? "default" : "pointer" }}
-                    onChange={(e) => {
-                        gPitchShift = parseInt((e.target as HTMLSelectElement).value, 10);
-                        core.scheduleRedraw();
-                    }}
-                >
-                    {SEMITONE_OPTIONS.map(n => (
-                        <option key={n} value={n}>{semitonelabel(n)}</option>
-                    ))}
-                </select>
+            <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <label style={{ fontSize: "13px", color: "#374151", whiteSpace: "nowrap" }}>
+                        Pitch:
+                    </label>
+                    <select
+                        value={gPitchShift}
+                        disabled={!!busy}
+                        style={{ fontSize: "13px", padding: "4px 8px", border: "1px solid #d1d5db",
+                                 borderRadius: "4px", background: "white", cursor: busy ? "default" : "pointer" }}
+                        onChange={(e) => {
+                            gPitchShift = parseInt((e.target as HTMLSelectElement).value, 10);
+                            core.scheduleRedraw();
+                        }}
+                    >
+                        {SEMITONE_OPTIONS.map(n => (
+                            <option key={n} value={n}>{semitonelabel(n)}</option>
+                        ))}
+                    </select>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <label style={{ fontSize: "13px", color: "#374151", whiteSpace: "nowrap" }}>
+                        Speed:
+                    </label>
+                    <select
+                        value={gSpeedAdjust}
+                        disabled={!!busy}
+                        style={{ fontSize: "13px", padding: "4px 8px", border: "1px solid #d1d5db",
+                                 borderRadius: "4px", background: "white", cursor: busy ? "default" : "pointer" }}
+                        onChange={(e) => {
+                            gSpeedAdjust = parseFloat((e.target as HTMLSelectElement).value);
+                            core.scheduleRedraw();
+                        }}
+                    >
+                        {SPEED_OPTIONS.map(s => (
+                            <option key={s} value={s}>{speedLabel(s)}</option>
+                        ))}
+                    </select>
+                </div>
                 {gSubmitError && <span style={{ color: "red", fontSize: "13px" }}>{gSubmitError}</span>}
             </div>
         </div>
@@ -127,7 +156,7 @@ function renderActiveJob() {
             : job.Step === "separating"
                 ? `Separating stems${job.Title ? ` for "${job.Title}"` : ""}…`
                 : job.Step === "shifting"
-                    ? "Shifting pitch…"
+                    ? "Adjusting audio…"
                     : job.Step === "transcribing"
                         ? "Transcribing lyrics…"
                         : job.Step === "analyzing"
@@ -246,11 +275,12 @@ function renderJobCard(job: Job) {
 
             {job.Status === "done" && (
                 <div style={{ marginTop: "10px" }}>
-                    {(job.BPM > 0 || job.Key || job.PitchShift !== 0) && (
+                    {(job.BPM > 0 || job.Key || job.PitchShift !== 0 || (job.SpeedAdjust !== 0 && job.SpeedAdjust !== 1.0)) && (
                         <div style={{ display: "flex", gap: "12px", marginBottom: "8px", fontSize: "13px", color: "#374151" }}>
                             {job.BPM > 0 && <span><strong>BPM:</strong> {job.BPM}</span>}
                             {job.Key && <span><strong>Key:</strong> {job.Key}</span>}
                             {job.PitchShift !== 0 && <span><strong>Pitch:</strong> {job.PitchShift > 0 ? `+${job.PitchShift}` : job.PitchShift} st</span>}
+                            {job.SpeedAdjust !== 0 && job.SpeedAdjust !== 1.0 && <span><strong>Speed:</strong> {job.SpeedAdjust}×</span>}
                         </div>
                     )}
                     <audio controls src={`/jobs/${job.ID}/no_vocals.mp3`}
@@ -376,7 +406,9 @@ async function submitJob() {
     gSubmitError = "";
     core.scheduleRedraw();
 
-    const [resp, err] = await server.SubmitJob({ URL: url, PitchShift: gPitchShift });
+    const speed = gSpeedAdjust;
+    const pitch = gPitchShift;
+    const [resp, err] = await server.SubmitJob({ URL: url, PitchShift: pitch, SpeedAdjust: speed });
     gSubmitting = false;
 
     if (err || !resp) {
@@ -387,6 +419,7 @@ async function submitJob() {
 
     gUrlInput = "";
     gPitchShift = 0;
+    gSpeedAdjust = 1.0;
     gActiveJobId = resp.JobID;
 
     // Optimistically add the job to the list (skip if server returned an existing job via dedup)
@@ -404,8 +437,9 @@ async function submitJob() {
             StepStartedAt: "",
             BPM: 0,
             Key: "",
-            PitchShift: gPitchShift,
+            PitchShift: pitch,
             Lyrics: "",
+            SpeedAdjust: speed,
         };
         gJobs.unshift(newJob);
     } else {

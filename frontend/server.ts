@@ -27,6 +27,7 @@ export interface Job {
     BPM: number
     Key: string
     PitchShift: number
+    Lyrics: string
 }
 
 export interface Empty {

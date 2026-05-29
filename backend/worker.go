@@ -25,6 +25,9 @@ import (
 //go:embed analyze.py
 var analyzeScript []byte
 
+//go:embed transcribe.py
+var transcribeScript []byte
+
 var jobQueue chan string
 
 func StartWorker(db *vbolt.DB) {
@@ -461,7 +464,34 @@ func processJob(db *vbolt.DB, id string) {
 		}
 	}
 
-	// Step 5: analyze BPM and key
+	// Step 5: transcribe lyrics from vocals
+	updateJob(db, id, func(j *Job) {
+		j.Step = "transcribing"
+		j.Progress = 97
+	})
+
+	vocalsMP3 := filepath.Join(stemDir, "vocals.mp3")
+	transcriptPath := filepath.Join(jobDir, "transcribe.py")
+	if writeErr := os.WriteFile(transcriptPath, transcribeScript, 0644); writeErr == nil {
+		transcribeCmd := exec.Command(cfg.PythonCmd, transcriptPath, vocalsMP3)
+		transcribeCmd.Env = append(os.Environ(), "OMP_NUM_THREADS=1")
+		if out, transcribeErr := transcribeCmd.Output(); transcribeErr == nil {
+			var result struct {
+				Text string `json:"text"`
+			}
+			if json.Unmarshal(out, &result) == nil && result.Text != "" {
+				updateJob(db, id, func(j *Job) {
+					j.Lyrics = result.Text
+				})
+			} else {
+				log.Printf("worker: transcribe parse error for job %s: %s", id, out)
+			}
+		} else {
+			log.Printf("worker: transcribe failed for job %s: %s", id, transcribeErr)
+		}
+	}
+
+	// Step 6: analyze BPM and key
 	updateJob(db, id, func(j *Job) {
 		j.Step = "analyzing"
 		j.Progress = 98

@@ -16,6 +16,7 @@ let gActiveJobId = "";
 let gPollInterval: ReturnType<typeof setInterval> | null = null;
 let gHistoryOpen = false;
 let gExpandedErrors = new Set<string>();
+let gExpandedLyrics = new Set<string>();
 let gDeletingIds = new Set<string>();
 
 export async function fetch(_route: string, _prefix: string) {
@@ -26,6 +27,7 @@ export async function fetch(_route: string, _prefix: string) {
     gSubmitting = false;
     gPitchShift = 0;
     gHistoryOpen = false;
+    gExpandedLyrics.clear();
     gDeletingIds.clear();
 
     const [resp, err] = await server.ListJobs({});
@@ -126,9 +128,11 @@ function renderActiveJob() {
                 ? `Separating stems${job.Title ? ` for "${job.Title}"` : ""}…`
                 : job.Step === "shifting"
                     ? "Shifting pitch…"
-                    : job.Step === "analyzing"
-                        ? "Detecting BPM and key…"
-                        : "Processing…";
+                    : job.Step === "transcribing"
+                        ? "Transcribing lyrics…"
+                        : job.Step === "analyzing"
+                            ? "Detecting BPM and key…"
+                            : "Processing…";
 
     return (
         <div style={{ padding: "12px 16px", background: "#f0f9ff", border: "1px solid #bae6fd",
@@ -261,7 +265,39 @@ function renderJobCard(job: Job) {
                             ↓ Vocals only
                         </a>
                     </div>
+                    {job.Lyrics && <LyricsBlock lyrics={job.Lyrics} jobId={job.ID} />}
                 </div>
+            )}
+        </div>
+    );
+}
+
+function LyricsBlock({ lyrics, jobId }: { lyrics: string; jobId: string }) {
+    const expanded = gExpandedLyrics.has(jobId);
+    const lines = lyrics.split(/\n+/).filter(l => l.trim());
+    const preview = lines.slice(0, 4).join("\n");
+    const isLong = lines.length > 4;
+    return (
+        <div style={{ marginTop: "10px" }}>
+            <div style={{ fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Lyrics</div>
+            <pre style={{ margin: 0, padding: "10px 12px", background: "#f9fafb", border: "1px solid #e5e7eb",
+                          borderRadius: "4px", fontSize: "13px", color: "#374151",
+                          whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "inherit",
+                          lineHeight: "1.6" }}>
+                {expanded ? lyrics : preview}
+            </pre>
+            {isLong && (
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        expanded ? gExpandedLyrics.delete(jobId) : gExpandedLyrics.add(jobId);
+                        core.scheduleRedraw();
+                    }}
+                    style={{ marginTop: "4px", background: "none", border: "none", padding: 0,
+                             cursor: "pointer", color: "#2563eb", fontSize: "12px", textDecoration: "underline" }}
+                >
+                    {expanded ? "Show less" : `Show all (${lines.length} lines)`}
+                </button>
             )}
         </div>
     );
@@ -369,6 +405,7 @@ async function submitJob() {
             BPM: 0,
             Key: "",
             PitchShift: gPitchShift,
+            Lyrics: "",
         };
         gJobs.unshift(newJob);
     } else {

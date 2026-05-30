@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "preact": "^10.26.9",
+    "tone": "^15.1.22",
     "vlens": "^0.1.6"
   },
   "devDependencies": {

@@ -2,6 +2,7 @@ import * as preact from "preact";
 import * as core from "vlens/core";
 import * as rpc from "vlens/rpc";
 import * as server from "@app/server";
+import { PitchShift, getContext, start as toneStart } from "tone";
 
 const nativeFetch = window.fetch.bind(window);
 
@@ -23,6 +24,10 @@ let gExpandedLyrics = new Set<string>();
 let gDeletingIds = new Set<string>();
 let gInputMode: "url" | "upload" = "url";
 let gUploadFile: File | null = null;
+let gPlayerPitch = new Map<string, number>();
+let gPlayerSpeed = new Map<string, number>();
+let gToneNodes = new Map<string, PitchShift>();
+let gAudioElements = new Map<string, HTMLAudioElement>();
 
 export async function fetch(_route: string, _prefix: string) {
     stopSSE();
@@ -36,6 +41,10 @@ export async function fetch(_route: string, _prefix: string) {
     gDeletingIds.clear();
     gInputMode = "url";
     gUploadFile = null;
+    gPlayerPitch.clear();
+    gPlayerSpeed.clear();
+    gToneNodes.clear();
+    gAudioElements.clear();
 
     const [resp, err] = await server.ListJobs({});
     if (err) return rpc.err<Data>(err);
@@ -329,8 +338,7 @@ function renderJobCard(job: Job) {
                             {job.SpeedAdjust !== 0 && job.SpeedAdjust !== 1.0 && <span><strong>Speed:</strong> {job.SpeedAdjust}×</span>}
                         </div>
                     )}
-                    <audio controls src={`/jobs/${job.ID}/no_vocals.mp3`}
-                           style={{ width: "100%", marginBottom: "8px" }} />
+                    <AudioPlayer src={`/jobs/${job.ID}/no_vocals.mp3`} jobId={job.ID} />
                     <div style={{ display: "flex", gap: "8px" }}>
                         <a href="#" onClick={() => { window.location.href = `/jobs/${job.ID}/no_vocals.mp3`; }}
                            style={downloadLinkStyle}>
@@ -344,6 +352,68 @@ function renderJobCard(job: Job) {
                     {job.Lyrics && <LyricsBlock lyrics={job.Lyrics} jobId={job.ID} />}
                 </div>
             )}
+        </div>
+    );
+}
+
+function initToneForJob(jobId: string, el: HTMLAudioElement) {
+    if (gToneNodes.has(jobId)) return;
+    const ps = new PitchShift(0);
+    ps.toDestination();
+    const source = (getContext().rawContext as AudioContext).createMediaElementSource(el);
+    source.connect(ps.input as unknown as AudioNode);
+    gToneNodes.set(jobId, ps);
+}
+
+function AudioPlayer({ src, jobId }: { src: string; jobId: string }) {
+    const pitch = gPlayerPitch.get(jobId) ?? 0;
+    const speed = gPlayerSpeed.get(jobId) ?? 1.0;
+    return (
+        <div style={{ marginBottom: "8px" }}>
+            <audio
+                controls
+                src={src}
+                style={{ width: "100%", marginBottom: "6px" }}
+                ref={(el) => {
+                    if (!el) return;
+                    gAudioElements.set(jobId, el);
+                    initToneForJob(jobId, el);
+                    el.playbackRate = speed;
+                }}
+                onPlay={() => toneStart()}
+            />
+            <div style={{ display: "flex", gap: "16px", fontSize: "13px", color: "#374151", flexWrap: "wrap" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    Speed: {speed.toFixed(1)}×
+                    <input
+                        type="range" min="0.5" max="2.0" step="0.1"
+                        value={speed}
+                        style={{ cursor: "pointer" }}
+                        onInput={(e) => {
+                            const v = parseFloat((e.target as HTMLInputElement).value);
+                            gPlayerSpeed.set(jobId, v);
+                            const el = gAudioElements.get(jobId);
+                            if (el) el.playbackRate = v;
+                            core.scheduleRedraw();
+                        }}
+                    />
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    Pitch: {pitch > 0 ? `+${pitch}` : pitch} st
+                    <input
+                        type="range" min="-12" max="12" step="1"
+                        value={pitch}
+                        style={{ cursor: "pointer" }}
+                        onInput={(e) => {
+                            const v = parseInt((e.target as HTMLInputElement).value);
+                            gPlayerPitch.set(jobId, v);
+                            const ps = gToneNodes.get(jobId);
+                            if (ps) ps.pitch = v;
+                            core.scheduleRedraw();
+                        }}
+                    />
+                </label>
+            </div>
         </div>
     );
 }
@@ -441,6 +511,11 @@ async function deleteJob(jobID: string) {
     }
     gJobs = gJobs.filter(j => j.ID !== jobID);
     gExpandedErrors.delete(jobID);
+    gToneNodes.get(jobID)?.dispose();
+    gToneNodes.delete(jobID);
+    gAudioElements.delete(jobID);
+    gPlayerPitch.delete(jobID);
+    gPlayerSpeed.delete(jobID);
     core.scheduleRedraw();
 }
 

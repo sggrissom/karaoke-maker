@@ -467,13 +467,21 @@ func processJob(db *vbolt.DB, id string) { //nolint:gocyclo
 				rbArgs = append(rbArgs, "-t", strconv.FormatFloat(ratio, 'f', 4, 64))
 			}
 			rbArgs = append(rbArgs, wavPath, shiftedPath)
+			var rbStderr bytes.Buffer
 			rbCmd := exec.Command("rubberband", rbArgs...)
+			rbCmd.Stderr = &rbStderr
 			if rbErr := rbCmd.Run(); rbErr != nil {
-				log.Printf("worker: rubberband %s failed: %s", stem, rbErr)
-			} else {
-				os.Remove(wavPath)
-				os.Rename(shiftedPath, wavPath)
+				errMsg := fmt.Sprintf("rubberband %s failed: %s\n%s", stem, rbErr, strings.TrimSpace(rbStderr.String()))
+				log.Println("worker:", errMsg)
+				updateJob(db, id, func(j *Job) {
+					j.Status = StatusError
+					j.Error = errMsg
+					j.CompletedAt = time.Now()
+				})
+				return
 			}
+			os.Remove(wavPath)
+			os.Rename(shiftedPath, wavPath)
 		}
 	}
 

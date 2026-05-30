@@ -40,6 +40,10 @@ func MakeApplication() *vbeam.Application {
 
 	backend.RegisterMethods(app)
 
+	app.HandleFunc("GET /jobs/{id}/progress", func(w http.ResponseWriter, r *http.Request) {
+		jobSSE(app.DB, w, r)
+	})
+
 	app.HandleFunc("GET /jobs/", func(w http.ResponseWriter, r *http.Request) {
 		serveJobFile(app.DB, w, r)
 	})
@@ -133,6 +137,53 @@ func uploadAudio(db *vbolt.DB, w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"JobID": id})
+}
+
+func jobSSE(db *vbolt.DB, w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+
+	var job backend.Job
+	vbolt.WithReadTx(db, func(tx *vbolt.Tx) {
+		vbolt.Read(tx, backend.JobBucket, jobID, &job)
+	})
+	if job.ID == "" {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	send := func(j backend.Job) bool {
+		data, _ := json.Marshal(j)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		return j.Status == backend.StatusDone || j.Status == backend.StatusError
+	}
+
+	if send(job) {
+		return
+	}
+
+	ch, unsub := backend.Subscribe(jobID)
+	defer unsub()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case updated, ok := <-ch:
+			if !ok {
+				return
+			}
+			if send(updated) {
+				return
+			}
+		}
+	}
 }
 
 func serveJobFile(db *vbolt.DB, w http.ResponseWriter, r *http.Request) {

@@ -16,7 +16,7 @@ let gSpeedAdjust = 1.0;
 let gSubmitting = false;
 let gSubmitError = "";
 let gActiveJobId = "";
-let gPollInterval: ReturnType<typeof setInterval> | null = null;
+let gEventSource: EventSource | null = null;
 let gHistoryOpen = false;
 let gExpandedErrors = new Set<string>();
 let gExpandedLyrics = new Set<string>();
@@ -25,8 +25,7 @@ let gInputMode: "url" | "upload" = "url";
 let gUploadFile: File | null = null;
 
 export async function fetch(_route: string, _prefix: string) {
-    gPollInterval && clearInterval(gPollInterval);
-    gPollInterval = null;
+    stopSSE();
     gActiveJobId = "";
     gSubmitError = "";
     gSubmitting = false;
@@ -42,11 +41,11 @@ export async function fetch(_route: string, _prefix: string) {
     if (err) return rpc.err<Data>(err);
     gJobs = resp!.Jobs ?? [];
 
-    // Resume polling if any job is still active
+    // Resume SSE stream if any job is still active
     const active = gJobs.find(j => j.Status === "queued" || j.Status === "running");
     if (active) {
         gActiveJobId = active.ID;
-        startPolling();
+        startSSE(active.ID);
     }
 
     return rpc.ok<Data>({ jobs: gJobs });
@@ -504,7 +503,7 @@ async function submitUrlJob() {
         gHistoryOpen = true;
     }
 
-    startPolling();
+    startSSE(resp.JobID);
     core.scheduleRedraw();
 }
 
@@ -570,41 +569,31 @@ async function uploadJob() {
     };
     gJobs.unshift(newJob);
 
-    startPolling();
+    startSSE(newJob.ID);
     core.scheduleRedraw();
 }
 
-function startPolling() {
-    if (gPollInterval !== null) clearInterval(gPollInterval);
-    gPollInterval = setInterval(pollActiveJob, 3000);
+function startSSE(jobID: string) {
+    stopSSE();
+    const es = new EventSource(`/jobs/${jobID}/progress`);
+    gEventSource = es;
+
+    es.onmessage = (e) => {
+        const job = JSON.parse(e.data) as Job;
+        const idx = gJobs.findIndex(j => j.ID === job.ID);
+        if (idx >= 0) gJobs[idx] = job;
+        else gJobs.unshift(job);
+
+        if (job.Status === "done" || job.Status === "error") stopSSE();
+        core.scheduleRedraw();
+    };
+
+    es.onerror = () => stopSSE();
 }
 
-async function pollActiveJob() {
-    if (!gActiveJobId) {
-        stopPolling();
-        return;
-    }
-
-    const [job, err] = await server.GetJob({ JobID: gActiveJobId });
-    if (err || !job) return;
-
-    const idx = gJobs.findIndex(j => j.ID === job.ID);
-    if (idx >= 0) {
-        gJobs[idx] = job;
-    } else {
-        gJobs.unshift(job);
-    }
-
-    if (job.Status === "done" || job.Status === "error") {
-        stopPolling();
-    }
-
-    core.scheduleRedraw();
-}
-
-function stopPolling() {
-    if (gPollInterval !== null) {
-        clearInterval(gPollInterval);
-        gPollInterval = null;
+function stopSSE() {
+    if (gEventSource) {
+        gEventSource.close();
+        gEventSource = null;
     }
 }

@@ -67,14 +67,19 @@ func runWorker(db *vbolt.DB) {
 }
 
 func updateJob(db *vbolt.DB, id string, fn func(*Job)) {
+	var updated Job
 	vbolt.WithWriteTx(db, func(tx *vbolt.Tx) {
 		var job Job
 		if vbolt.Read(tx, JobBucket, id, &job) {
 			fn(&job)
 			vbolt.Write(tx, JobBucket, id, &job)
+			updated = job
 		}
 		vbolt.TxCommit(tx)
 	})
+	if updated.ID != "" {
+		notifySubscribers(id, updated)
+	}
 }
 
 // splitOnCRorLF splits on \n or \r so tqdm overwrite lines are treated as separate tokens.

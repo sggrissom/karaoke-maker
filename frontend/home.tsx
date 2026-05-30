@@ -3,6 +3,8 @@ import * as core from "vlens/core";
 import * as rpc from "vlens/rpc";
 import * as server from "@app/server";
 
+const nativeFetch = window.fetch.bind(window);
+
 type Job = server.Job;
 
 type Data = { jobs: Job[] };
@@ -19,6 +21,8 @@ let gHistoryOpen = false;
 let gExpandedErrors = new Set<string>();
 let gExpandedLyrics = new Set<string>();
 let gDeletingIds = new Set<string>();
+let gInputMode: "url" | "upload" = "url";
+let gUploadFile: File | null = null;
 
 export async function fetch(_route: string, _prefix: string) {
     gPollInterval && clearInterval(gPollInterval);
@@ -31,6 +35,8 @@ export async function fetch(_route: string, _prefix: string) {
     gHistoryOpen = false;
     gExpandedLyrics.clear();
     gDeletingIds.clear();
+    gInputMode = "url";
+    gUploadFile = null;
 
     const [resp, err] = await server.ListJobs({});
     if (err) return rpc.err<Data>(err);
@@ -73,29 +79,69 @@ function speedLabel(s: number): string {
 function renderForm() {
     const activeJob = gJobs.find(j => j.ID === gActiveJobId);
     const busy = gSubmitting || (activeJob && (activeJob.Status === "queued" || activeJob.Status === "running"));
+    const canSubmit = !busy && (gInputMode === "url" ? !!gUrlInput.trim() : !!gUploadFile);
+
+    const tabStyle = (active: boolean): preact.JSX.CSSProperties => ({
+        padding: "6px 14px", fontSize: "13px", border: "1px solid #d1d5db",
+        borderRadius: "4px", cursor: busy ? "default" : "pointer",
+        background: active ? "#2563eb" : "white",
+        color: active ? "white" : "#374151",
+        fontWeight: active ? 600 : 400,
+    });
 
     return (
         <div style={{ marginBottom: "24px" }}>
+            <div style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
+                <button style={tabStyle(gInputMode === "url")} disabled={!!busy}
+                    onClick={() => { gInputMode = "url"; gSubmitError = ""; core.scheduleRedraw(); }}>
+                    YouTube URL
+                </button>
+                <button style={tabStyle(gInputMode === "upload")} disabled={!!busy}
+                    onClick={() => { gInputMode = "upload"; gSubmitError = ""; core.scheduleRedraw(); }}>
+                    Upload File
+                </button>
+            </div>
+
             <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
-                <input
-                    type="text"
-                    placeholder="YouTube URL"
-                    value={gUrlInput}
-                    style={{ flex: 1, padding: "8px 12px", fontSize: "14px", border: "1px solid #ccc", borderRadius: "4px" }}
-                    onInput={(e) => {
-                        gUrlInput = (e.target as HTMLInputElement).value;
-                        core.scheduleRedraw();
-                    }}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !busy) submitJob(); }}
-                />
+                {gInputMode === "url" ? (
+                    <input
+                        type="text"
+                        placeholder="YouTube URL"
+                        value={gUrlInput}
+                        style={{ flex: 1, padding: "8px 12px", fontSize: "14px", border: "1px solid #ccc", borderRadius: "4px" }}
+                        onInput={(e) => {
+                            gUrlInput = (e.target as HTMLInputElement).value;
+                            core.scheduleRedraw();
+                        }}
+                        onKeyDown={(e) => { if (e.key === "Enter" && canSubmit) submitJob(); }}
+                    />
+                ) : (
+                    <label style={{ flex: 1, display: "flex", alignItems: "center", gap: "10px",
+                                    padding: "8px 12px", border: "1px dashed #9ca3af", borderRadius: "4px",
+                                    cursor: busy ? "default" : "pointer", background: "#f9fafb" }}>
+                        <input
+                            type="file"
+                            accept=".mp3,.wav,.flac,.ogg,.m4a,.aac,.opus"
+                            style={{ display: "none" }}
+                            onChange={(e) => {
+                                gUploadFile = (e.target as HTMLInputElement).files?.[0] ?? null;
+                                gSubmitError = "";
+                                core.scheduleRedraw();
+                            }}
+                        />
+                        <span style={{ fontSize: "14px", color: gUploadFile ? "#111827" : "#6b7280" }}>
+                            {gUploadFile ? gUploadFile.name : "Choose audio file (mp3, wav, flac, ogg, m4a…)"}
+                        </span>
+                    </label>
+                )}
                 <button
-                    onClick={() => { if (!busy) submitJob(); }}
-                    disabled={!!busy || !gUrlInput.trim()}
-                    style={{ padding: "8px 16px", fontSize: "14px", cursor: busy ? "default" : "pointer",
+                    onClick={() => { if (canSubmit) submitJob(); }}
+                    disabled={!canSubmit}
+                    style={{ padding: "8px 16px", fontSize: "14px", cursor: canSubmit ? "pointer" : "default",
                              background: "#2563eb", color: "white", border: "none", borderRadius: "4px",
-                             opacity: (busy || !gUrlInput.trim()) ? 0.5 : 1 }}
+                             opacity: canSubmit ? 1 : 0.5, whiteSpace: "nowrap" }}
                 >
-                    {gSubmitting ? "Submitting…" : "Make Karaoke"}
+                    {gSubmitting ? (gInputMode === "upload" ? "Uploading…" : "Submitting…") : "Make Karaoke"}
                 </button>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
@@ -399,8 +445,17 @@ async function deleteJob(jobID: string) {
 }
 
 async function submitJob() {
+    if (gSubmitting) return;
+    if (gInputMode === "upload") {
+        await uploadJob();
+    } else {
+        await submitUrlJob();
+    }
+}
+
+async function submitUrlJob() {
     const url = gUrlInput.trim();
-    if (!url || gSubmitting) return;
+    if (!url) return;
 
     gSubmitting = true;
     gSubmitError = "";
@@ -446,6 +501,71 @@ async function submitJob() {
         // Dedup returned an existing job; open history so user sees it
         gHistoryOpen = true;
     }
+
+    startPolling();
+    core.scheduleRedraw();
+}
+
+async function uploadJob() {
+    if (!gUploadFile) return;
+
+    gSubmitting = true;
+    gSubmitError = "";
+    core.scheduleRedraw();
+
+    const file = gUploadFile;
+    const pitch = gPitchShift;
+    const speed = gSpeedAdjust;
+
+    const formData = new FormData();
+    formData.append("audio", file);
+    formData.append("pitchShift", String(pitch));
+    formData.append("speedAdjust", String(speed));
+
+    let jobID = "";
+    try {
+        const res = await nativeFetch("/upload", { method: "POST", body: formData });
+        if (!res.ok) {
+            const msg = await res.text();
+            gSubmitError = msg || `upload failed (${res.status})`;
+            gSubmitting = false;
+            core.scheduleRedraw();
+            return;
+        }
+        const data = await res.json();
+        jobID = data.JobID;
+    } catch (e: unknown) {
+        gSubmitError = e instanceof Error ? e.message : "upload failed";
+        gSubmitting = false;
+        core.scheduleRedraw();
+        return;
+    }
+
+    gSubmitting = false;
+    gUploadFile = null;
+    gPitchShift = 0;
+    gSpeedAdjust = 1.0;
+    gActiveJobId = jobID;
+
+    const safeName = file.name.replace(/\.[^.]+$/, "");
+    const newJob: Job = {
+        ID: jobID,
+        URL: "",
+        Status: "queued",
+        Step: "",
+        Progress: 0,
+        Title: safeName,
+        CreatedAt: new Date().toISOString(),
+        CompletedAt: new Date().toISOString(),
+        Error: "",
+        StepStartedAt: "",
+        BPM: 0,
+        Key: "",
+        PitchShift: pitch,
+        Lyrics: "",
+        SpeedAdjust: speed,
+    };
+    gJobs.unshift(newJob);
 
     startPolling();
     core.scheduleRedraw();

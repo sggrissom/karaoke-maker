@@ -153,7 +153,7 @@ func ytNeedsCookies(errText string) bool {
 	return false
 }
 
-func processJob(db *vbolt.DB, id string) {
+func processJob(db *vbolt.DB, id string) { //nolint:gocyclo
 	var job Job
 	vbolt.WithReadTx(db, func(tx *vbolt.Tx) {
 		vbolt.Read(tx, JobBucket, id, &job)
@@ -165,79 +165,94 @@ func processJob(db *vbolt.DB, id string) {
 
 	log.Printf("worker: starting job %s: %s", id, job.URL)
 	jobDir := filepath.Join(cfg.JobsDir, id)
-	os.RemoveAll(jobDir)
-	os.MkdirAll(jobDir, 0755)
 
-	updateJob(db, id, func(j *Job) {
-		j.Status = StatusRunning
-		j.Step = "downloading"
-		j.Progress = 0
-	})
-
-	// Step 1: download audio
-	baseYtArgs := []string{
-		"--no-playlist",
-		"--extract-audio",
-		"--audio-format", "mp3",
-		"--audio-quality", "0",
-		"--output", filepath.Join(jobDir, "%(title)s.%(ext)s"),
-		"--print", "after_move:filepath",
-	}
-	nodePath := cfg.NodeCmd
-	if nodePath == "" {
-		nodePath, _ = exec.LookPath("node")
-	}
-	if nodePath != "" {
-		log.Printf("worker: using node at %s", nodePath)
-		baseYtArgs = append(baseYtArgs, "--js-runtimes", "node:"+nodePath)
-	} else {
-		log.Println("worker: node not found, yt-dlp may fail without a JS runtime")
-	}
-
-	// Build the ordered list of download attempts.
-	// Each attempt is a set of extra args to append to baseYtArgs.
-	type attempt struct {
-		label     string
-		extraArgs []string
-		authOnly  bool // skip unless a prior attempt failed with an auth error
-	}
-	var attempts []attempt
-	if cfg.CookiesBrowser != "" {
-		attempts = []attempt{
-			{label: "browser:" + cfg.CookiesBrowser, extraArgs: []string{"--cookies-from-browser", cfg.CookiesBrowser}},
-		}
-	} else {
-		attempts = []attempt{
-			{label: "default", extraArgs: nil},
-			{label: "android", extraArgs: []string{"--extractor-args", "youtube:player_client=android"}},
-			{label: "tv_embedded", extraArgs: []string{"--extractor-args", "youtube:player_client=tv_embedded"}},
-		}
-		if cfg.CookiesFile != "" {
-			attempts = append(attempts,
-				attempt{label: "cookies+default", authOnly: true, extraArgs: []string{"--cookies", cfg.CookiesFile}},
-				attempt{label: "cookies+android", authOnly: true, extraArgs: []string{"--cookies", cfg.CookiesFile, "--extractor-args", "youtube:player_client=android"}},
-			)
-		} else {
-			// Browser-cookie fallbacks only make sense on a dev machine.
-			browserFallbacks := []string{"chrome", "firefox"}
-			if runtime.GOOS == "darwin" {
-				browserFallbacks = []string{"chrome", "safari"}
-			}
-			for _, br := range browserFallbacks {
-				attempts = append(attempts, attempt{
-					label:    "browser:" + br,
-					authOnly: true,
-					extraArgs: []string{"--cookies-from-browser", br},
-				})
-			}
-		}
-	}
-
-	var audioFile string
+	var audioFile, title string
 	var audioFiles []string
-	var lastErrMsg string
-	needsAuth := false
-	for _, att := range attempts {
+
+	if job.AudioFile != "" {
+		// Uploaded file — skip download step entirely
+		audioFile = job.AudioFile
+		title = strings.TrimSuffix(filepath.Base(audioFile), filepath.Ext(audioFile))
+		audioFiles = []string{audioFile}
+		os.MkdirAll(jobDir, 0755)
+		updateJob(db, id, func(j *Job) {
+			j.Status = StatusRunning
+			j.Step = "separating"
+			j.Progress = 20
+			j.StepStartedAt = time.Now()
+		})
+	} else {
+		os.RemoveAll(jobDir)
+		os.MkdirAll(jobDir, 0755)
+
+		updateJob(db, id, func(j *Job) {
+			j.Status = StatusRunning
+			j.Step = "downloading"
+			j.Progress = 0
+		})
+
+		// Step 1: download audio
+		baseYtArgs := []string{
+			"--no-playlist",
+			"--extract-audio",
+			"--audio-format", "mp3",
+			"--audio-quality", "0",
+			"--output", filepath.Join(jobDir, "%(title)s.%(ext)s"),
+			"--print", "after_move:filepath",
+		}
+		nodePath := cfg.NodeCmd
+		if nodePath == "" {
+			nodePath, _ = exec.LookPath("node")
+		}
+		if nodePath != "" {
+			log.Printf("worker: using node at %s", nodePath)
+			baseYtArgs = append(baseYtArgs, "--js-runtimes", "node:"+nodePath)
+		} else {
+			log.Println("worker: node not found, yt-dlp may fail without a JS runtime")
+		}
+
+		// Build the ordered list of download attempts.
+		// Each attempt is a set of extra args to append to baseYtArgs.
+		type attempt struct {
+			label     string
+			extraArgs []string
+			authOnly  bool // skip unless a prior attempt failed with an auth error
+		}
+		var attempts []attempt
+		if cfg.CookiesBrowser != "" {
+			attempts = []attempt{
+				{label: "browser:" + cfg.CookiesBrowser, extraArgs: []string{"--cookies-from-browser", cfg.CookiesBrowser}},
+			}
+		} else {
+			attempts = []attempt{
+				{label: "default", extraArgs: nil},
+				{label: "android", extraArgs: []string{"--extractor-args", "youtube:player_client=android"}},
+				{label: "tv_embedded", extraArgs: []string{"--extractor-args", "youtube:player_client=tv_embedded"}},
+			}
+			if cfg.CookiesFile != "" {
+				attempts = append(attempts,
+					attempt{label: "cookies+default", authOnly: true, extraArgs: []string{"--cookies", cfg.CookiesFile}},
+					attempt{label: "cookies+android", authOnly: true, extraArgs: []string{"--cookies", cfg.CookiesFile, "--extractor-args", "youtube:player_client=android"}},
+				)
+			} else {
+				// Browser-cookie fallbacks only make sense on a dev machine.
+				browserFallbacks := []string{"chrome", "firefox"}
+				if runtime.GOOS == "darwin" {
+					browserFallbacks = []string{"chrome", "safari"}
+				}
+				for _, br := range browserFallbacks {
+					attempts = append(attempts, attempt{
+						label:    "browser:" + br,
+						authOnly: true,
+						extraArgs: []string{"--cookies-from-browser", br},
+					})
+				}
+			}
+		}
+
+		var lastErrMsg string
+		needsAuth := false
+		for _, att := range attempts {
 		if att.authOnly && !needsAuth {
 			continue
 		}
@@ -305,40 +320,41 @@ func processJob(db *vbolt.DB, id string) {
 		}
 	}
 
-	if len(audioFiles) == 0 {
-		// yt-dlp may have succeeded but not printed to stdout; scan jobDir as fallback.
-		entries, _ := os.ReadDir(jobDir)
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".mp3") {
-				audioFiles = append(audioFiles, filepath.Join(jobDir, e.Name()))
+		if len(audioFiles) == 0 {
+			// yt-dlp may have succeeded but not printed to stdout; scan jobDir as fallback.
+			entries, _ := os.ReadDir(jobDir)
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".mp3") {
+					audioFiles = append(audioFiles, filepath.Join(jobDir, e.Name()))
+				}
 			}
 		}
-	}
 
-	if len(audioFiles) == 0 {
-		if lastErrMsg == "" {
-			lastErrMsg = "download failed: no audio files found"
+		if len(audioFiles) == 0 {
+			if lastErrMsg == "" {
+				lastErrMsg = "download failed: no audio files found"
+			}
+			log.Println("worker:", lastErrMsg)
+			updateJob(db, id, func(j *Job) {
+				j.Status = StatusError
+				j.Error = lastErrMsg
+				j.CompletedAt = time.Now()
+			})
+			return
 		}
-		log.Println("worker:", lastErrMsg)
+
+		audioFile = audioFiles[0]
+		title = strings.TrimSuffix(filepath.Base(audioFile), ".mp3")
+		log.Printf("worker: downloaded %d file(s), first: %q", len(audioFiles), audioFile)
+
 		updateJob(db, id, func(j *Job) {
-			j.Status = StatusError
-			j.Error = lastErrMsg
-			j.CompletedAt = time.Now()
+			j.Title = title
+			j.AudioFile = audioFile
+			j.Step = "separating"
+			j.Progress = 20
+			j.StepStartedAt = time.Now()
 		})
-		return
-	}
-
-	audioFile = audioFiles[0]
-	title := strings.TrimSuffix(filepath.Base(audioFile), ".mp3")
-	log.Printf("worker: downloaded %d file(s), first: %q", len(audioFiles), audioFile)
-
-	updateJob(db, id, func(j *Job) {
-		j.Title = title
-		j.AudioFile = audioFile
-		j.Step = "separating"
-		j.Progress = 20
-		j.StepStartedAt = time.Now()
-	})
+	} // end else (download branch)
 
 	// Step 2: separate stems
 	// -u forces unbuffered output so tqdm progress lines reach the pipe promptly

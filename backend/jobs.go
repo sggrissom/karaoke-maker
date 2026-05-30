@@ -31,13 +31,14 @@ type Job struct {
 	PitchShift    int     // semitones, -12 to +12
 	Lyrics        string
 	SpeedAdjust   float64 // playback speed multiplier, 0 or 1.0 = no change
+	VocalRange    string  // e.g. "E3–C5 (Tenor)"
 }
 
 var DbInfo vbolt.Info
 var JobBucket = vbolt.Bucket[string, Job](&DbInfo, "jobs", vpack.String, packJob)
 
 func packJob(j *Job, buf *vpack.Buffer) {
-	version := vpack.Version(5, buf)
+	version := vpack.Version(6, buf)
 	vpack.String(&j.ID, buf)
 	vpack.String(&j.URL, buf)
 	vpack.String(&j.Status, buf)
@@ -61,5 +62,8 @@ func packJob(j *Job, buf *vpack.Buffer) {
 	}
 	if version >= 5 {
 		vpack.Float64(&j.SpeedAdjust, buf)
+	}
+	if version >= 6 {
+		vpack.String(&j.VocalRange, buf)
 	}
 }

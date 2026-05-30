@@ -321,10 +321,11 @@ function renderJobCard(job: Job) {
 
             {job.Status === "done" && (
                 <div style={{ marginTop: "10px" }}>
-                    {(job.BPM > 0 || job.Key || job.PitchShift !== 0 || (job.SpeedAdjust !== 0 && job.SpeedAdjust !== 1.0)) && (
-                        <div style={{ display: "flex", gap: "12px", marginBottom: "8px", fontSize: "13px", color: "#374151" }}>
+                    {(job.BPM > 0 || job.Key || job.VocalRange || job.PitchShift !== 0 || (job.SpeedAdjust !== 0 && job.SpeedAdjust !== 1.0)) && (
+                        <div style={{ display: "flex", gap: "12px", marginBottom: "8px", fontSize: "13px", color: "#374151", flexWrap: "wrap" }}>
                             {job.BPM > 0 && <span><strong>BPM:</strong> {job.BPM}</span>}
                             {job.Key && <span><strong>Key:</strong> {job.Key}</span>}
+                            {job.VocalRange && <span><strong>Vocal range:</strong> {job.VocalRange}</span>}
                             {job.PitchShift !== 0 && <span><strong>Pitch:</strong> {job.PitchShift > 0 ? `+${job.PitchShift}` : job.PitchShift} st</span>}
                             {job.SpeedAdjust !== 0 && job.SpeedAdjust !== 1.0 && <span><strong>Speed:</strong> {job.SpeedAdjust}×</span>}
                         </div>
@@ -495,6 +496,7 @@ async function submitUrlJob() {
             PitchShift: pitch,
             Lyrics: "",
             SpeedAdjust: speed,
+            VocalRange: "",
         };
         gJobs.unshift(newJob);
     } else {
@@ -564,6 +566,7 @@ async function uploadJob() {
         PitchShift: pitch,
         Lyrics: "",
         SpeedAdjust: speed,
+        VocalRange: "",
     };
     gJobs.unshift(newJob);
 

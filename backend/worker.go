@@ -28,6 +28,9 @@ var analyzeScript []byte
 //go:embed transcribe.py
 var transcribeScript []byte
 
+//go:embed vocal_range.py
+var vocalRangeScript []byte
+
 var jobQueue chan string
 
 func StartWorker(db *vbolt.DB) {
@@ -543,6 +546,32 @@ func processJob(db *vbolt.DB, id string) { //nolint:gocyclo
 			}
 		} else {
 			log.Printf("worker: analyze failed for job %s: %s", id, analyzeErr)
+		}
+	}
+
+	// Step 7: detect vocal range
+	updateJob(db, id, func(j *Job) {
+		j.Step = "analyzing"
+		j.Progress = 99
+	})
+
+	vocalRangePath := filepath.Join(jobDir, "vocal_range.py")
+	if writeErr := os.WriteFile(vocalRangePath, vocalRangeScript, 0644); writeErr == nil {
+		vocalRangeCmd := exec.Command(cfg.PythonCmd, vocalRangePath, vocalsMP3)
+		vocalRangeCmd.Env = append(os.Environ(), "OMP_NUM_THREADS=1")
+		if out, vocalRangeErr := vocalRangeCmd.Output(); vocalRangeErr == nil {
+			var result struct {
+				Range string `json:"range"`
+			}
+			if json.Unmarshal(out, &result) == nil && result.Range != "" {
+				updateJob(db, id, func(j *Job) {
+					j.VocalRange = result.Range
+				})
+			} else {
+				log.Printf("worker: vocal range parse error for job %s: %s", id, out)
+			}
+		} else {
+			log.Printf("worker: vocal range failed for job %s: %s", id, vocalRangeErr)
 		}
 	}
 

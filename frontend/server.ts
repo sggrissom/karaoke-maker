@@ -30,6 +30,7 @@ export interface Job {
     PitchShift: number
     Lyrics: string
     SpeedAdjust: number
+    VocalRange: string
 }
 
 export interface Empty {
